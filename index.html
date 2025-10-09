@@ -1,13 +1,94 @@
-<script type="importmap">
-{
-  "imports": {
-    "react": "https://aistudiocdn.com/react@^19.2.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-    "react/": "https://aistudiocdn.com/react@^19.2.0/",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.23.0",
-    "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
-    "remark-math": "https://aistudiocdn.com/remark-math@^6.0.0"
-  }
-}
-</script>
-full contents of index.html
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>해적 - AI 해설지 제작 도우미</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Pretendard', sans-serif;
+        }
+        .prose {
+            color: inherit;
+        }
+        .prose :where(p) {
+            margin-top: 0.75em;
+            margin-bottom: 0.75em;
+        }
+        .prose :where(h1, h2, h3, h4) {
+            color: inherit;
+        }
+    </style>
+    <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              'background': '#121212',
+              'surface': '#1e1e1e',
+              'primary': '#333333',
+              'accent': '#00aaff',
+              'accent-hover': '#0088cc',
+              'danger': '#ff4444',
+              'success': '#00c851',
+              'text-primary': '#e0e0e0',
+              'text-secondary': '#a0a0a0',
+            },
+            animation: {
+                blink: 'blink 1.5s infinite',
+            },
+            keyframes: {
+                blink: {
+                    '0%, 100%': { opacity: 1 },
+                    '50%': { opacity: 0.5 },
+                }
+            }
+          }
+        }
+      }
+    </script>
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+    </script>
+    <!-- MathJax -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            },
+            svg: {
+                fontCache: 'global'
+            },
+            startup: {
+                ready: () => {
+                    window.MathJax.startup.defaultReady();
+                }
+            }
+        };
+    </script>
+    <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "react": "https://aistudiocdn.com/react@^19.2.0",
+        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+        "react/": "https://aistudiocdn.com/react@^19.2.0/",
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.23.0",
+        "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
+        "remark-math": "https://aistudiocdn.com/remark-math@^6.0.0"
+      }
+    }
+    </script>
+    <script type="module" src="/index.tsx"></script>
+</body>
+</html>

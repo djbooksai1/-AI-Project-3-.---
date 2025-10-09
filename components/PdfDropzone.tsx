@@ -62,7 +62,7 @@ export const PdfDropzone: React.FC<PdfDropzoneProps> = ({ onFileProcess }) => {
             />
             <label htmlFor="pdf-upload" className="flex flex-col items-center justify-center text-center cursor-pointer p-4 w-full h-full">
                 <UploadIcon />
-                <p className="mt-4 text-lg font-semibold text-brand-red animate-blink">
+                <p className="mt-4 text-lg font-semibold text-accent animate-blink">
                     최고의 해설지가 필요한 문제를 넣어주세요
                 </p>
                 <p className="mt-2 text-sm text-text-secondary">

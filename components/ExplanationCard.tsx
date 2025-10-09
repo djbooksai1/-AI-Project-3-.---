@@ -70,10 +70,12 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
     const [copied, setCopied] = useState(false);
     const renderedContentRef = useRef<HTMLDivElement>(null);
 
-    const cleanMarkdown = useMemo(() => {
+    const rawMarkdown = useMemo(() => {
         const match = explanation.markdown.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
-        let rawMarkdown = match ? match[1].trim() : explanation.markdown.trim();
-        
+        return match ? match[1].trim() : explanation.markdown.trim();
+    }, [explanation.markdown]);
+
+    const cleanMarkdown = useMemo(() => {
         // 1. 새로운 로직을 적용하여 누락된 LaTeX를 자동으로 감싸줍니다.
         const fixedLatexMarkdown = autoWrapLatex(rawMarkdown);
 
@@ -89,7 +91,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
         });
 
         return processedSegments.join('');
-    }, [explanation.markdown]);
+    }, [rawMarkdown]);
 
     // cleanMarkdown 텍스트가 변경될 때마다 MathJax를 실행하여 수식을 렌더링합니다.
     useEffect(() => {
@@ -102,7 +104,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
 
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(cleanMarkdown);
+        navigator.clipboard.writeText(rawMarkdown);
         setCopied(true);
     };
 
@@ -148,7 +150,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                     </div>
                     <textarea
                         readOnly
-                        value={explanation.markdown.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/)?.[1].trim() ?? explanation.markdown.trim()}
+                        value={rawMarkdown}
                         className="w-full h-80 bg-background p-4 rounded-md text-sm text-text-secondary font-mono resize-none border-2 border-accent/50 focus:ring-2 focus:ring-accent outline-none"
                     />
                 </div>
