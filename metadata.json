@@ -1,0 +1,5 @@
+{
+  "name": "다정 AI Project[3] 해.적 - 해설 적용하기",
+  "description": "PDF 문제지를 업로드하여 각 문제에 대한 상세한 Markdown 해설을 생성하고, LaTeX으로 렌더링된 결과물을 미리 볼 수 있는 AI 기반 해설지 제작 도우미입니다.",
+  "requestFramePermissions": []
+}
