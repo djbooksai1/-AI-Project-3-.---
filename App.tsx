@@ -1,188 +1,897 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { GuidelinesModal } from './components/GuidelinesModal';
-import { PdfDropzone } from './components/PdfDropzone';
+import { FileDropzone } from './components/PdfDropzone';
 import { Loader } from './components/Loader';
 import { ExplanationCard } from './components/ExplanationCard';
-import { RetryIcon } from './components/icons/RetryIcon';
-import { pdfToImages } from './services/pdfService';
-import { generateExplanation } from './services/geminiService';
-import { Explanation } from './types';
+import { ProblemSelector } from './components/ProblemSelector';
+import { PdfIcon } from './components/icons/PdfIcon';
+import { HwpIcon } from './components/icons/HwpIcon';
+import { exportToPdf, exportToHtml } from './services/exportService';
+import { Explanation, ExplanationMode, ExtractedProblem, UserSelection, QnaData, ExplanationSet, UsageData } from './types';
+import { FloatingInput } from './components/FloatingInput';
+import { DEFAULT_GUIDELINES } from './guidelines';
+import { getProcessingService } from './services/processingService';
+import { useTheme } from './hooks/useTheme';
+import { ThemeEditor } from './components/ThemeEditor';
+import { db, auth } from './firebaseConfig';
+import { doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, getDocs, writeBatch, addDoc, deleteDoc, where, documentId, increment } from 'firebase/firestore';
+import { 
+    createUserWithEmailAndPassword, 
+    signInWithEmailAndPassword, 
+    onAuthStateChanged, 
+    signOut,
+    User,
+    GoogleAuthProvider,
+    signInWithPopup
+} from 'firebase/auth';
+import { QnaPanel } from './components/QnaPanel';
+import { uploadImageFromBase64 } from './services/storageService';
+import { HistoryPanel } from './components/HistoryPanel';
 
-const DEFAULT_GUIDELINES = `1. **개념 먼저, 풀이 나중:** 문제 해결에 필요한 핵심 개념, 공식, 또는 원리를 먼저 명확하게 설명합니다. 그 후, 이 개념을 어떻게 문제에 적용하는지 단계별로 보여줍니다.
-2. **단계별 풀이:** 풀이 과정을 여러 단계로 나누어 각 단계마다 무엇을 하는지 명확한 소제목(예: '1단계: 방정식 세우기')을 붙여 설명합니다. 복잡한 계산은 중간 과정을 생략하지 않고 보여줍니다.
-3. **친절한 말투:** 학생이 옆에서 과외를 받는 것처럼, 친절하고 이해하기 쉬운 구어체로 설명합니다. "해봅시다", "~해야 합니다", "~을 알 수 있습니다"와 같은 표현을 사용합니다.
-4. **시각적 요소 활용:** 분수, 루트, 시그마 등 모든 수학 기호와 수식은 LaTeX 문법을 사용하여 명확하게 표현합니다. 모든 LaTeX 문법은 반드시 '$' 기호로 감싸야 합니다(예: $y = x^2 + 2x + 1$).
-5. **핵심 강조:** 문제 해결의 핵심이 되는 부분이나 학생들이 자주 실수하는 부분은 **볼드체**나 색상(지원 시)을 사용하여 강조하고, '주의' 또는 '핵심'과 같은 표식을 붙여 부가 설명을 합니다.
-6. **답 명시:** 모든 풀이가 끝난 후, 최종 답을 명확하게 보여줍니다. (예: '따라서, 정답은 5입니다.')`;
+// [+] 인증 UI 컴포넌트
+const AuthComponent = () => {
+    const [isLogin, setIsLogin] = useState(true);
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [error, setError] = useState('');
 
-const App: React.FC = () => {
-    const [explanations, setExplanations] = useState<Explanation[]>([]);
-    const [isLoading, setIsLoading] = useState(false);
-    const [loadingStatus, setLoadingStatus] = useState('');
-    const [guidelines, setGuidelines] = useState(DEFAULT_GUIDELINES);
-    const [isGuidelinesOpen, setIsGuidelinesOpen] = useState(false);
-    const [estimatedTime, setEstimatedTime] = useState<number | null>(null);
-    const explanationCounterRef = useRef(0);
-
-    useEffect(() => {
-        const savedGuidelines = localStorage.getItem('guidelines');
-        if (savedGuidelines) {
-            setGuidelines(savedGuidelines);
-        }
-    }, []);
-    
-    const handleSetGuidelines = (newGuidelines: string) => {
-        setGuidelines(newGuidelines);
-        localStorage.setItem('guidelines', newGuidelines);
-    }
-
-    const handleFileProcess = useCallback(async (file: File) => {
-        setIsLoading(true);
-        setLoadingStatus('PDF 파일을 페이지별 이미지로 변환 중입니다...');
-        setExplanations([]);
-        explanationCounterRef.current = 0;
-        
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError('');
         try {
-            const images = await pdfToImages(file);
-            const totalPages = images.length;
-            const AVG_TIME_PER_PAGE = 45; // 페이지당 평균 예상 시간 (초)
-            setEstimatedTime(totalPages * AVG_TIME_PER_PAGE);
-
-            const explanationPromises = images.map((base64Image, index) => {
-                return (async () => {
-                    try {
-                         setLoadingStatus(`${index + 1}/${totalPages} 페이지 해설 생성 중...`);
-                         const markdown = await generateExplanation(base64Image, guidelines, false);
-                         const newExplanation: Explanation = {
-                             id: explanationCounterRef.current++,
-                             questionImage: base64Image,
-                             markdown,
-                             markedForRetry: false,
-                             isSatisfied: false,
-                         };
-                         // Update state progressively
-                         setExplanations(prev => [...prev, newExplanation].sort((a,b) => a.id - b.id));
-                    } catch (err) {
-                        console.error(`Error generating explanation for page ${index + 1}:`, err);
-                        const errorExplanation: Explanation = {
-                            id: explanationCounterRef.current++,
-                            questionImage: base64Image,
-                            markdown: `오류: 해설 생성에 실패했습니다. (${err instanceof Error ? err.message : 'Unknown error'})`,
-                            markedForRetry: true,
-                            isSatisfied: false,
-                        };
-                        setExplanations(prev => [...prev, errorExplanation].sort((a,b) => a.id - b.id));
-                    }
-                })();
-            });
-
-            await Promise.all(explanationPromises);
-
-        } catch (error) {
-            alert(error instanceof Error ? error.message : "알 수 없는 오류가 발생했습니다.");
-            console.error(error);
-        } finally {
-            setIsLoading(false);
-            setLoadingStatus('');
-            setEstimatedTime(null);
+            if (isLogin) {
+                await signInWithEmailAndPassword(auth, email, password);
+            } else {
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                // 회원가입 성공 시 Firestore에 사용자 문서 생성
+                const user = userCredential.user;
+                await setDoc(doc(db, "users", user.uid), {
+                    email: user.email,
+                    createdAt: serverTimestamp(),
+                    tier: 'free', // 기본 등급 부여
+                });
+            }
+        } catch (err) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('An unknown error occurred.');
+            }
         }
-    }, [guidelines]);
+    };
+    
+    const handleGoogleLogin = async () => {
+        setError('');
+        try {
+            const provider = new GoogleAuthProvider();
+            const result = await signInWithPopup(auth, provider);
+            const user = result.user;
 
-    const handleToggleRetry = (id: number) => {
-        setExplanations(prev =>
-            prev.map(exp =>
-                exp.id === id ? { ...exp, markedForRetry: !exp.markedForRetry } : exp
-            )
-        );
+            // Firestore에 사용자 정보가 있는지 확인하고, 없으면 새로 생성
+            const userDocRef = doc(db, "users", user.uid);
+            const userDoc = await getDoc(userDocRef);
+            if (!userDoc.exists()) {
+                await setDoc(userDocRef, {
+                    email: user.email,
+                    createdAt: serverTimestamp(),
+                    displayName: user.displayName,
+                    photoURL: user.photoURL,
+                    tier: 'free', // 기본 등급 부여
+                });
+            }
+        } catch (err) {
+            if (err instanceof Error) {
+                setError(err.message);
+            } else {
+                setError('Google login failed.');
+            }
+        }
     };
 
-    const handleToggleSatisfied = (id: number) => {
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-background">
+            <div className="w-full max-w-md p-8 space-y-8 bg-surface rounded-lg shadow-lg border border-primary">
+                <div>
+                    <h2 className="text-3xl font-extrabold text-center text-accent">
+                        {isLogin ? '로그인' : '회원가입'}
+                    </h2>
+                </div>
+                {error && <p className="text-sm text-center text-danger">{error}</p>}
+                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+                    <div className="rounded-md shadow-sm -space-y-px">
+                        <div>
+                            <input
+                                id="email-address"
+                                name="email"
+                                type="email"
+                                autoComplete="email"
+                                required
+                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-primary bg-background placeholder-text-secondary text-text-primary rounded-t-md focus:outline-none focus:ring-accent focus:border-accent focus:z-10 sm:text-sm"
+                                placeholder="이메일 주소"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                            />
+                        </div>
+                        <div>
+                            <input
+                                id="password"
+                                name="password"
+                                type="password"
+                                autoComplete="current-password"
+                                required
+                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-primary bg-background placeholder-text-secondary text-text-primary rounded-b-md focus:outline-none focus:ring-accent focus:border-accent focus:z-10 sm:text-sm"
+                                placeholder="비밀번호"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                            />
+                        </div>
+                    </div>
+
+                    <div>
+                        <button
+                            type="submit"
+                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-accent hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-hover"
+                        >
+                            {isLogin ? '로그인' : '회원가입'}
+                        </button>
+                    </div>
+                </form>
+                
+                 <div className="relative my-4">
+                    <div className="absolute inset-0 flex items-center">
+                        <div className="w-full border-t border-primary" />
+                    </div>
+                    <div className="relative flex justify-center text-sm">
+                        <span className="px-2 bg-surface text-text-secondary">또는</span>
+                    </div>
+                </div>
+
+                <div>
+                    <button
+                        onClick={handleGoogleLogin}
+                        className="w-full inline-flex justify-center py-2 px-4 border border-primary shadow-sm bg-background text-sm font-medium text-text-primary rounded-md hover:bg-primary"
+                    >
+                        Google로 로그인
+                    </button>
+                </div>
+
+                <div className="text-sm text-center">
+                    <button
+                        onClick={() => {
+                            setIsLogin(!isLogin);
+                            setError('');
+                        }}
+                        className="font-medium text-accent hover:text-accent-hover"
+                    >
+                        {isLogin ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+};
+
+type SavingStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+// FIX: Replaced the function with a more robust, generic version to improve type safety and avoid potential inference errors.
+function useDebouncedCallback<T extends (...args: any[]) => any>(callback: T, delay: number) {
+    // FIX: Changed useRef to properly handle an undefined initial value for the timeout.
+    // The original `useRef<number>()` is invalid without an initial value, causing the "Expected 1 arguments, but got 0" error.
+    // FIX: The `useRef` hook requires an initial value. Passed `undefined` to fix the error.
+    const timeoutRef = useRef<number | undefined>(undefined);
+    
+    useEffect(() => {
+        // Cleanup the timeout on unmount
+        return () => {
+            if (timeoutRef.current) {
+                // FIX: Explicitly call window.clearTimeout to avoid potential scope conflicts.
+                window.clearTimeout(timeoutRef.current);
+            }
+        };
+    }, []);
+
+    const debouncedCallback = useCallback((...args: Parameters<T>) => {
+        if (timeoutRef.current) {
+            window.clearTimeout(timeoutRef.current);
+        }
+        timeoutRef.current = window.setTimeout(() => {
+            callback(...args);
+        }, delay);
+    }, [callback, delay]);
+
+    return debouncedCallback;
+}
+
+const isMobileDevice = (): boolean => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
+};
+
+// [+] 등급별 사용량 제한 설정
+const TIER_LIMITS: { [key: string]: UsageData } = {
+    free: { fast: 5, dajeong: 3, quality: 1 },
+    standard: { fast: Infinity, dajeong: 3, quality: 1 },
+    premium: { fast: Infinity, dajeong: Infinity, quality: 3 }
+};
+
+// [+] 오늘 날짜 문자열 생성 (YYYY-MM-DD)
+const getTodayDateString = () => {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
+
+export function App() {
+    const [user, setUser] = useState<User | null>(null);
+    const [isAuthenticating, setIsAuthenticating] = useState(true);
+
+    const [guidelines, setGuidelines] = useState(DEFAULT_GUIDELINES);
+    const [isGuidelinesOpen, setIsGuidelinesOpen] = useState(false);
+    const [isThemeEditorOpen, setIsThemeEditorOpen] = useState(false);
+    const [statusMessage, setStatusMessage] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const [explanations, setExplanations] = useState<Explanation[]>([]);
+    const [explanationIdCounter, setExplanationIdCounter] = useState(0);
+
+    const [isProcessing, setIsProcessing] = useState(false);
+    
+    // PDF/Image processing state
+    const [showProblemSelector, setShowProblemSelector] = useState(false);
+    const [pageImages, setPageImages] = useState<{ image: string; pageNumber: number }[]>([]);
+    const [initialProblems, setInitialProblems] = useState<Map<number, ExtractedProblem[]>>(new Map());
+    
+    // Auto-saving state
+    const [currentExplanationSetId, setCurrentExplanationSetId] = useState<string | null>(null);
+    const [isDirty, setIsDirty] = useState(false);
+    const [savingStatus, setSavingStatus] = useState<SavingStatus>('idle');
+
+    // History state
+    const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+    const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
+
+    // [+] 사용량 제한 관련 상태
+    const [userTier, setUserTier] = useState<'free' | 'standard' | 'premium'>('free');
+    const [usageData, setUsageData] = useState<UsageData>({ fast: 0, dajeong: 0, quality: 0 });
+    const [tierLimits, setTierLimits] = useState<UsageData>(TIER_LIMITS.free);
+
+
+    const [explanationMode, setExplanationMode] = useState<ExplanationMode>('dajeong');
+    const { layout } = useTheme();
+
+    const [activeQna, setActiveQna] = useState<QnaData | null>(null);
+
+    const renderedContentRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+    const handleGoHome = () => {
+        setExplanations([]);
+        setExplanationIdCounter(0);
+        setShowProblemSelector(false);
+        setError(null);
+        setStatusMessage(null);
+        setIsProcessing(false);
+        setIsSelectionMode(false);
+        setSelectedIds(new Set());
+        setActiveQna(null);
+        setCurrentExplanationSetId(null);
+        setIsDirty(false);
+        setSavingStatus('idle');
+    };
+
+    const handleOpenQna = useCallback((data: QnaData) => {
+        setActiveQna(data);
+    }, []);
+
+    const handleCloseQna = useCallback(() => {
+        setActiveQna(null);
+    }, []);
+
+    useEffect(() => {
+        renderedContentRefs.current = renderedContentRefs.current.slice(0, explanations.length);
+    }, [explanations.length]);
+    
+     useEffect(() => {
+        const fetchGuidelines = async () => {
+            if (!user) return; 
+
+            const guidelinesDocRef = doc(db, 'settings', 'guidelines');
+            try {
+                const docSnap = await getDoc(guidelinesDocRef);
+                if (docSnap.exists()) {
+                    setGuidelines(docSnap.data().content);
+                } else {
+                    await setDoc(guidelinesDocRef, { content: DEFAULT_GUIDELINES });
+                }
+            } catch (error) {
+                console.error("Error fetching guidelines from Firestore: ", error);
+                setError("가이드라인을 불러오는 데 실패했습니다. 권한을 확인해주세요.");
+            }
+        };
+
+        const fetchHistory = async (uid: string) => {
+            try {
+                const setsRef = collection(db, "explanationSets");
+                const q = query(setsRef, where("userId", "==", uid), orderBy("createdAt", "desc"));
+                const querySnapshot = await getDocs(q);
+                const sets = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExplanationSet));
+                setExplanationSets(sets);
+            } catch (error) {
+                console.error("Error fetching history:", error);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                if (errorMessage.includes('firestore/indexes?create_composite=')) {
+                    console.warn(
+                        "Firestore query for history failed due to a missing index. " +
+                        "This is expected on first run or without database setup. " +
+                        "To enable history, please create the composite index in your Firebase console. " +
+                        "The required index creation link can be found in the original error message in the browser console."
+                    );
+                } else {
+                    setError("저장된 해설 목록을 불러오는 데 실패했습니다.");
+                }
+            }
+        };
+
+        const fetchUserData = async (uid: string) => {
+            const userDocRef = doc(db, "users", uid);
+            const usageDocRef = doc(db, "users", uid, "usage", getTodayDateString());
+
+            try {
+                // 사용자 등급 조회
+                const userDocSnap = await getDoc(userDocRef);
+                if (userDocSnap.exists()) {
+                    const userData = userDocSnap.data();
+                    const tier = userData.tier || 'free';
+                    setUserTier(tier);
+                    setTierLimits(TIER_LIMITS[tier] || TIER_LIMITS.free);
+                }
+
+                // 오늘의 사용량 조회
+                const usageDocSnap = await getDoc(usageDocRef);
+                if (usageDocSnap.exists()) {
+                    setUsageData(usageDocSnap.data() as UsageData);
+                } else {
+                    setUsageData({ fast: 0, dajeong: 0, quality: 0 });
+                }
+            } catch (e) {
+                console.error("Error fetching user data:", e);
+                setError("사용자 등급 및 사용량 정보를 불러오는 데 실패했습니다.");
+            }
+        };
+
+
+        if (user) {
+            fetchGuidelines();
+            fetchHistory(user.uid);
+            fetchUserData(user.uid);
+        }
+    }, [user]);
+
+    // Auto-saving logic
+    const performSave = useCallback(async () => {
+        if (!isDirty || !user || explanations.length === 0) {
+            return;
+        }
+
+        setSavingStatus('saving');
+        setError(null);
+
+        try {
+            let setId = currentExplanationSetId;
+
+            // 1. If it's a new set, create the parent document first
+            if (!setId) {
+                const newSetRef = await addDoc(collection(db, "explanationSets"), {
+                    userId: user.uid,
+                    title: `${new Date().toLocaleDateString('ko-KR')} 해설`,
+                    createdAt: serverTimestamp(),
+                    explanationCount: explanations.length
+                });
+                setId = newSetRef.id;
+                setCurrentExplanationSetId(setId);
+            }
+
+            // 2. Upload any new images (base64) to Storage
+            const explanationsWithImageUrls = await Promise.all(
+                explanations.map(async (exp) => {
+                    if (exp.problemImage.startsWith('data:image')) {
+                        const imageUrl = await uploadImageFromBase64(user.uid, exp.problemImage);
+                        return { ...exp, problemImage: imageUrl };
+                    }
+                    return exp;
+                })
+            );
+
+            // 3. Batch write all explanations to the subcollection
+            const explanationsRef = collection(db, "explanationSets", setId, "explanations");
+            const batch = writeBatch(db);
+
+            // Simple sync: delete old ones first
+            // FIX: The documentId function must be called to return a FieldPath object.
+            const oldDocsSnapshot = await getDocs(query(explanationsRef, where(documentId(), "!=", "placeholder")));
+            oldDocsSnapshot.forEach(doc => batch.delete(doc.ref));
+
+            explanationsWithImageUrls.forEach(exp => {
+                const { id, isLoading, isError, ...dataToSave } = exp;
+                const docRef = doc(explanationsRef, exp.docId || undefined); // Use existing docId or create new
+                batch.set(docRef, { ...dataToSave, problemNumber: exp.problemNumber });
+            });
+            
+             // Update the count on the parent document
+            const setDocRef = doc(db, "explanationSets", setId);
+            batch.update(setDocRef, { explanationCount: explanations.length });
+
+
+            await batch.commit();
+
+            setSavingStatus('saved');
+            setIsDirty(false);
+            // Refresh history list
+            const setsRef = collection(db, "explanationSets");
+            const q = query(setsRef, where("userId", "==", user.uid), orderBy("createdAt", "desc"));
+            const querySnapshot = await getDocs(q);
+            setExplanationSets(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExplanationSet)));
+
+
+        } catch (error) {
+            console.error("Auto-save failed:", error);
+            setSavingStatus('error');
+            setError(error instanceof Error ? error.message : "자동 저장에 실패했습니다.");
+        }
+    }, [isDirty, user, explanations, currentExplanationSetId]);
+    
+    const debouncedSave = useDebouncedCallback(performSave, 2500);
+
+    useEffect(() => {
+        if (isDirty) {
+            setSavingStatus('saving');
+            debouncedSave();
+        }
+    }, [explanations, isDirty, debouncedSave]);
+
+    const loadExplanationSet = async (setId: string) => {
+        handleGoHome(); // Reset state before loading
+        setIsProcessing(true);
+        setStatusMessage("해설 세트를 불러오는 중...");
+        try {
+            const explanationsRef = collection(db, "explanationSets", setId, "explanations");
+            const q = query(explanationsRef, orderBy("problemNumber", "asc"));
+            const querySnapshot = await getDocs(q);
+            
+            let counter = 0;
+            const loadedExplanations: Explanation[] = querySnapshot.docs.map((doc) => {
+                const data = doc.data();
+                return {
+                    id: counter++,
+                    docId: doc.id,
+                    markdown: data.markdown,
+                    isSatisfied: data.isSatisfied,
+                    isLoading: false,
+                    isError: false,
+                    pageNumber: data.pageNumber,
+                    problemNumber: data.problemNumber,
+                    problemImage: data.problemImage,
+                    originalProblemText: data.originalProblemText,
+                };
+            });
+            
+            setExplanations(loadedExplanations);
+            setExplanationIdCounter(loadedExplanations.length);
+            setCurrentExplanationSetId(setId);
+            setIsDirty(false);
+            setSavingStatus('idle');
+            setIsHistoryOpen(false);
+
+        } catch (error) {
+            console.error("Error loading explanation set: ", error);
+            setError('해설 세트를 불러오는 데 실패했습니다.');
+        } finally {
+            setIsProcessing(false);
+            setStatusMessage(null);
+        }
+    };
+    
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+            if (currentUser) {
+                setUser(currentUser);
+            } else {
+                setUser(null);
+                handleGoHome(); // Clear all data on logout
+            }
+            setIsAuthenticating(false);
+        });
+        return () => unsubscribe();
+    }, []);
+    
+    const handleConfirmSelections = useCallback(async (selections: UserSelection[]) => {
+        setShowProblemSelector(false);
+        if (selections.length === 0) return;
+
+        // [+] 사용량 제한 확인
+        // [보안 경고] 이 로직은 클라이언트 측에서만 실행되므로 숙련된 사용자는 제한을 우회할 수 있습니다.
+        // 프로덕션 환경에서는 이 검증 로직을 Firebase Cloud Function과 같은 서버 측 코드로 이동하여
+        // API 호출을 안전하게 제어하는 것이 강력히 권장됩니다.
+        const remainingUsage = tierLimits[explanationMode] - (usageData[explanationMode] || 0);
+        if (selections.length > remainingUsage) {
+            const modeLabel = { fast: '빠른해설', dajeong: '표준해설', 'quality': '전문해설' }[explanationMode];
+            setError(`'${modeLabel}' 모드의 오늘 사용량을 초과했습니다. 오늘은 ${remainingUsage}개까지 더 생성할 수 있습니다.`);
+            return;
+        }
+
+        setIsProcessing(true);
+        setError(null);
+
+        // [+] Firestore에 사용량 업데이트
+        if (user) {
+            const today = getTodayDateString();
+            const usageDocRef = doc(db, "users", user.uid, "usage", today);
+            try {
+                await setDoc(usageDocRef, {
+                    [explanationMode]: increment(selections.length)
+                }, { merge: true });
+                
+                // 로컬 상태 즉시 업데이트
+                setUsageData(prev => ({
+                    ...prev,
+                    [explanationMode]: (prev[explanationMode] || 0) + selections.length,
+                }));
+
+            } catch (e) {
+                console.error("Failed to update usage data:", e);
+                setError("사용량 기록에 실패했습니다. 해설 생성을 중단합니다.");
+                setIsProcessing(false);
+                return;
+            }
+        } else {
+            setError("사용자 인증 정보가 없습니다. 다시 로그인해주세요.");
+            setIsProcessing(false);
+            return;
+        }
+        
+        let nextId = explanationIdCounter;
+        
+        const processingService = getProcessingService();
+        processingService.generateExplanationsForSelections(selections, pageImages, guidelines, explanationMode, {
+            setStatusMessage,
+            onNewExplanation: (placeholder) => {
+                 setExplanations(prev => [...prev, { ...placeholder, id: nextId++ }]);
+            },
+            onUpdateExplanation: (updatedExplanation) => {
+                setExplanations(prev =>
+                    prev.map(exp => (exp.id === updatedExplanation.id ? updatedExplanation : exp))
+                );
+            },
+            onComplete: () => {
+                setIsProcessing(false);
+                setStatusMessage('모든 해설 생성이 완료되었습니다.');
+                setTimeout(() => setStatusMessage(null), 3000);
+                setExplanationIdCounter(nextId);
+                setIsDirty(true); // Mark for auto-saving
+            },
+            onError: (err) => {
+                setError(err.message);
+                setIsProcessing(false);
+                setStatusMessage(null);
+            },
+        });
+    }, [pageImages, guidelines, explanationMode, explanationIdCounter, user, tierLimits, usageData]);
+
+    const handleFileProcess = useCallback(async (files: File[]) => {
+        if (files.length === 0) return;
+        handleGoHome(); // Start a new session
+        setIsProcessing(true);
+        setStatusMessage('파일 분석을 시작합니다...');
+        setError(null);
+
+        try {
+            const processingService = getProcessingService();
+            const { pages, initialProblems } = await processingService.analyzeFiles(files, setStatusMessage);
+            setPageImages(pages);
+
+            const isMobile = isMobileDevice();
+
+            if (isMobile && initialProblems.size > 0) {
+                setStatusMessage('모바일 환경에서는 모든 문제를 자동으로 선택합니다...');
+                const allSelections: UserSelection[] = [];
+                initialProblems.forEach((problems, pageNum) => {
+                    problems.forEach(p => {
+                        allSelections.push({
+                            id: p.id || `${pageNum}-${Math.random().toString(36).substr(2, 9)}`,
+                            pageNumber: pageNum,
+                            bbox: p.bbox,
+                            initialText: '', // No initial text from client-side detection
+                        });
+                    });
+                });
+                
+                if (allSelections.length > 0) {
+                    handleConfirmSelections(allSelections);
+                } else {
+                     setError("이미지에서 문제를 찾을 수 없습니다. 데스크탑 환경에서 영역을 직접 지정해보세요.");
+                     setIsProcessing(false);
+                     setStatusMessage(null);
+                }
+            } else {
+                setInitialProblems(initialProblems);
+                setShowProblemSelector(true);
+                setIsProcessing(false); // Stop processing indicator, selector is now shown
+                setStatusMessage(null);
+            }
+
+        } catch (err) {
+            setError(err instanceof Error ? err.message : '파일 처리 중 알 수 없는 오류가 발생했습니다.');
+            setIsProcessing(false);
+            setStatusMessage(null);
+        }
+    }, [handleConfirmSelections]);
+    
+    const handlePaste = useCallback((event: ClipboardEvent) => {
+        if (showProblemSelector || isProcessing) return;
+        const items = event.clipboardData?.items;
+        if (!items) return;
+        
+        const files: File[] = [];
+        for (let i = 0; i < items.length; i++) {
+            if (items[i].type.indexOf('image') !== -1) {
+                const blob = items[i].getAsFile();
+                if (blob) {
+                    const file = new File([blob], `pasted_image_${Date.now()}.png`, { type: blob.type });
+                    files.push(file);
+                }
+            }
+        }
+        if (files.length > 0) {
+            handleFileProcess(files);
+        }
+    }, [handleFileProcess, showProblemSelector, isProcessing]);
+
+    useEffect(() => {
+        window.addEventListener('paste', handlePaste);
+        return () => {
+            window.removeEventListener('paste', handlePaste);
+        };
+    }, [handlePaste]);
+
+
+    const handleDeleteExplanation = useCallback((id: number) => {
+        setExplanations(prev => prev.filter(exp => exp.id !== id));
+        setIsDirty(true);
+    }, []);
+
+    const handleToggleSatisfied = useCallback((id: number) => {
         setExplanations(prev =>
             prev.map(exp =>
                 exp.id === id ? { ...exp, isSatisfied: !exp.isSatisfied } : exp
             )
         );
-    };
+        setIsDirty(true);
+    }, []);
     
-    const handleRetryMarked = useCallback(async () => {
-        const retryList = explanations.filter(e => e.markedForRetry);
-        if (retryList.length === 0) {
-            alert('다시 생성할 해설이 없습니다. X 버튼을 눌러 다시 생성할 해설을 선택해주세요.');
+    const handleDeleteSet = async (setId: string) => {
+        if (!confirm("정말로 이 해설 세트를 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다.")) {
             return;
         }
 
-        setIsLoading(true);
-        const totalRetries = retryList.length;
-        setEstimatedTime(totalRetries * 45);
+        try {
+            // Also need to delete images from storage, but for simplicity, we'll skip that here.
+            // A more robust solution would use a Cloud Function to clean up storage on document delete.
+            const setDocRef = doc(db, "explanationSets", setId);
+            
+            const explanationsRef = collection(db, "explanationSets", setId, "explanations");
+            const snapshot = await getDocs(explanationsRef);
+            const batch = writeBatch(db);
+            snapshot.forEach(doc => batch.delete(doc.ref));
+            await batch.commit();
 
-        let completedRetries = 0;
-        
-        for (const exp of retryList) {
-            completedRetries++;
-            setLoadingStatus(`${completedRetries}/${totalRetries}개 해설 재성성 중...`);
-            try {
-                const newMarkdown = await generateExplanation(exp.questionImage, guidelines, true);
-                setExplanations(prev => prev.map(e => 
-                    e.id === exp.id ? { ...e, markdown: newMarkdown, markedForRetry: false } : e
-                ));
-            } catch (err) {
-                console.error(`Failed to retry explanation for id ${exp.id}:`, err);
-                alert(`해설 재성성에 실패했습니다 (ID: ${exp.id}).\n${err instanceof Error ? err.message : 'Unknown error'}`);
-                 setExplanations(prev => prev.map(e => 
-                    e.id === exp.id ? { ...e, markdown: `${e.markdown}\n\n---재시도 실패---\n${err instanceof Error ? err.message : 'Unknown error'}` } : e
-                ));
+            await deleteDoc(setDocRef);
+
+            setExplanationSets(prev => prev.filter(s => s.id !== setId));
+
+            if (currentExplanationSetId === setId) {
+                handleGoHome();
             }
-        }
-        
-        setIsLoading(false);
-        setLoadingStatus('');
-        setEstimatedTime(null);
-    }, [explanations, guidelines]);
 
+        } catch (error) {
+            console.error("Error deleting set:", error);
+            setError("해설 세트 삭제에 실패했습니다.");
+        }
+    };
+
+
+    const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+    
+    const toggleSelection = (id: number) => {
+        setSelectedIds(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(id)) {
+                newSet.delete(id);
+            } else {
+                newSet.add(id);
+            }
+            return newSet;
+        });
+    };
+    
+    const handleExport = async (format: 'pdf' | 'html') => {
+        if (selectedIds.size === 0) {
+            alert('내보낼 해설을 하나 이상 선택해주세요.');
+            return;
+        }
+
+        setStatusMessage(`(${selectedIds.size}개) 해설을 ${format.toUpperCase()} 파일로 변환하는 중...`);
+        setIsProcessing(true);
+
+        const selectedNodes = explanations
+            .filter(exp => selectedIds.has(exp.id))
+            .map(exp => renderedContentRefs.current[explanations.findIndex(e => e.id === exp.id)]);
+            
+        try {
+            if (format === 'pdf') {
+                await exportToPdf(selectedNodes, (progress) => {
+                     setStatusMessage(`PDF 생성 중... ${progress}%`);
+                });
+            } else {
+                await exportToHtml(selectedNodes, (progress) => {
+                     setStatusMessage(`HTML 생성 중... ${progress}%`);
+                });
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : '파일 내보내기에 실패했습니다.');
+        } finally {
+            setIsProcessing(false);
+            setStatusMessage(null);
+        }
+    };
+
+
+    const handleLogout = async () => {
+        try {
+            await signOut(auth);
+        } catch (err) {
+            console.error("Logout failed:", err);
+        }
+    };
+
+    if (isAuthenticating) {
+        return (
+            <div className="w-full h-screen flex items-center justify-center">
+                <Loader status="사용자 정보 확인 중..." />
+            </div>
+        );
+    }
+    
+    if (!user) {
+        return <AuthComponent />;
+    }
 
     return (
-        <div className="bg-background text-text-primary min-h-screen">
-            <Header onOpenGuidelines={() => setIsGuidelinesOpen(true)} />
+        <div className="min-h-screen bg-background text-text-primary">
+            <Header 
+                onGoHome={handleGoHome}
+                onOpenGuidelines={() => setIsGuidelinesOpen(true)}
+                onOpenThemeEditor={() => setIsThemeEditorOpen(true)}
+                onOpenHistory={() => setIsHistoryOpen(true)}
+                explanationMode={explanationMode}
+                onSetExplanationMode={setExplanationMode}
+                user={user}
+                onLogout={handleLogout}
+                savingStatus={savingStatus}
+                usageData={usageData}
+                tierLimits={tierLimits}
+            />
 
-            <main className="container mx-auto px-4 md:px-8 py-8">
-                {isLoading ? (
-                    <Loader status={loadingStatus} remainingTime={estimatedTime} />
-                ) : explanations.length === 0 ? (
-                    <PdfDropzone onFileProcess={handleFileProcess} />
-                ) : (
-                    <div className="space-y-8">
-                        <div className="flex justify-end">
-                            <button
-                                onClick={handleRetryMarked}
-                                disabled={!explanations.some(e => e.markedForRetry)}
-                                className="flex items-center gap-2 px-4 py-2 font-semibold bg-danger text-white rounded-md hover:bg-danger/80 disabled:bg-gray-500 disabled:cursor-not-allowed transition-colors"
-                            >
-                                <RetryIcon />
-                                선택한 해설 다시 만들기
-                            </button>
-                        </div>
-                        {explanations.map((exp, index) => (
-                            <ExplanationCard
-                                key={exp.id}
-                                explanation={exp}
-                                onToggleRetry={handleToggleRetry}
-                                onToggleSatisfied={handleToggleSatisfied}
-                                pageNumber={index + 1}
-                            />
-                        ))}
+            <main className="container mx-auto p-4 md:p-8">
+                {error && (
+                    <div className="bg-danger/20 border border-danger text-danger p-4 rounded-md mb-6">
+                        <strong>오류:</strong> {error}
                     </div>
                 )}
+                
+                {showProblemSelector && (
+                    <div className="fixed inset-0 bg-black/70 z-40 flex items-center justify-center p-4">
+                        <ProblemSelector
+                            pages={pageImages}
+                            initialProblems={initialProblems}
+                            onConfirm={handleConfirmSelections}
+                            onCancel={() => setShowProblemSelector(false)}
+                        />
+                    </div>
+                )}
+                
+                <div className="flex flex-row gap-6">
+                    <div className="flex-grow min-w-0">
+                        {isProcessing && !showProblemSelector && (
+                            <div className="flex justify-center my-12">
+                                <Loader status={statusMessage || '처리 중...'} />
+                            </div>
+                        )}
+
+                        {explanations.length === 0 && !isProcessing && (
+                            <FileDropzone onFileProcess={handleFileProcess} />
+                        )}
+
+                        {explanations.length > 0 && (
+                            <>
+                                <div className="bg-surface p-4 rounded-lg mb-6 border border-primary flex flex-col sm:flex-row justify-between items-center gap-4">
+                                <div className="flex items-center gap-4">
+                                    <label htmlFor="selection-mode" className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                id="selection-mode"
+                                                checked={isSelectionMode}
+                                                onChange={() => {
+                                                    setIsSelectionMode(!isSelectionMode);
+                                                    if (isSelectionMode) setSelectedIds(new Set()); // Clear selections when turning off
+                                                }}
+                                                className="h-5 w-5 rounded border-primary bg-background text-accent focus:ring-accent"
+                                            />
+                                            <span className="font-semibold">내보내기 선택</span>
+                                        </label>
+                                        {isSelectionMode && (
+                                            <span className="text-sm text-text-secondary">{selectedIds.size} / {explanations.length}개 선택됨</span>
+                                        )}
+                                </div>
+                                <div className="flex items-center gap-3">
+                                        <button onClick={() => handleExport('html')} disabled={!isSelectionMode || selectedIds.size === 0} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <HwpIcon />
+                                            HWP용 HTML로 내보내기
+                                        </button>
+                                        <button onClick={() => handleExport('pdf')} disabled={!isSelectionMode || selectedIds.size === 0} className="flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                                            <PdfIcon />
+                                            PDF로 내보내기
+                                        </button>
+                                </div>
+                                </div>
+
+                                <div className={`grid gap-6 ${layout.className}`}>
+                                    {explanations.map((exp, index) => (
+                                        <ExplanationCard
+                                            key={exp.id}
+                                            id={`explanation-card-${exp.id}`}
+                                            explanation={exp}
+                                            guidelines={guidelines}
+                                            onDelete={handleDeleteExplanation}
+                                            onToggleSatisfied={handleToggleSatisfied}
+                                            setRenderedContentRef={(el) => { renderedContentRefs.current[index] = el; }}
+                                            isSelectionMode={isSelectionMode}
+                                            isSelected={selectedIds.has(exp.id)}
+                                            onSelect={toggleSelection}
+                                            onOpenQna={handleOpenQna}
+                                            onCloseQna={handleCloseQna}
+                                            activeQna={activeQna}
+                                        />
+                                    ))}
+                                </div>
+                            </>
+                        )}
+                    </div>
+                </div>
             </main>
             
             <GuidelinesModal
                 isOpen={isGuidelinesOpen}
                 onClose={() => setIsGuidelinesOpen(false)}
                 guidelines={guidelines}
-                setGuidelines={handleSetGuidelines}
+                setGuidelines={setGuidelines}
+            />
+
+            <ThemeEditor 
+                isOpen={isThemeEditorOpen}
+                onClose={() => setIsThemeEditorOpen(false)}
+            />
+
+            <HistoryPanel
+                isOpen={isHistoryOpen}
+                onClose={() => setIsHistoryOpen(false)}
+                sets={explanationSets}
+                onLoadSet={loadExplanationSet}
+                onDeleteSet={handleDeleteSet}
             />
         </div>
     );
-};
-
-export default App;
+}

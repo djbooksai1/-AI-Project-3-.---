@@ -1,48 +1,79 @@
+import { fileToBase64 } from './fileService';
 
-// This uses the global pdfjsLib object loaded from the CDN in index.html
+// pdf.js is loaded globally from index.html via a script tag.
+// We declare the global variable for TypeScript to recognize it.
 declare const pdfjsLib: any;
 
-export const pdfToImages = async (file: File): Promise<string[]> => {
-    const images: string[] = [];
-    const fileReader = new FileReader();
+// The workerSrc is now robustly set in index.html to avoid race conditions.
 
-    return new Promise((resolve, reject) => {
-        fileReader.onload = async (event) => {
-            if (!event.target?.result) {
-                return reject(new Error("Failed to read file."));
-            }
+/**
+ * Tries to open a file as a PDF document using the globally available pdf.js library.
+ * This version uses an ArrayBuffer, which is more memory-efficient and stable for large
+ * multi-page PDFs compared to base64 data URLs.
+ * @param file The file to process.
+ * @returns A promise that resolves to a PDFDocumentProxy object.
+ * @throws An error if pdf.js cannot parse the file, which is caught by the processing service.
+ */
+export const getPdfDocument = async (file: File): Promise<any> => {
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const typedarray = new Uint8Array(arrayBuffer);
 
-            try {
-                const typedarray = new Uint8Array(event.target.result as ArrayBuffer);
-                const pdf = await pdfjsLib.getDocument(typedarray).promise;
+        // Pass an object with the data, which is a robust and efficient way to handle it.
+        const loadingTask = pdfjsLib.getDocument({ data: typedarray });
+        const pdf = await loadingTask.promise;
+        
+        return pdf;
 
-                for (let i = 1; i <= pdf.numPages; i++) {
-                    const page = await pdf.getPage(i);
-                    const viewport = page.getViewport({ scale: 1.5 });
-                    const canvas = document.createElement('canvas');
-                    const context = canvas.getContext('2d');
-                    
-                    if (!context) {
-                        return reject(new Error('Failed to get canvas context.'));
-                    }
+    } catch (error) {
+        // Fallback logic remains the same.
+        const errorMessage = ((error && typeof error === 'object' && 'message' in error) 
+            ? String((error as Error).message) 
+            : String(error)).toLowerCase();
 
-                    canvas.height = viewport.height;
-                    canvas.width = viewport.width;
+        // Create a specific error that the processing service can catch to trigger fallback logic.
+        if (errorMessage.includes('handler for document') || errorMessage.includes('invalid pdf structure') || errorMessage.includes('missing pdf')) {
+            console.warn(
+                `File "${file.name}" could not be opened as a PDF. Triggering fallback to image processing.`, 
+                error
+            );
+            throw new Error("PDF 형식이 아닙니다. 이미지로 처리를 시도합니다.");
+        }
+        
+        console.error(`An unexpected error occurred while opening PDF "${file.name}":`, error);
+        throw error; // Rethrow other unexpected errors.
+    }
+};
 
-                    await page.render({ canvasContext: context, viewport: viewport }).promise;
-                    images.push(canvas.toDataURL('image/jpeg'));
-                }
-                resolve(images);
-            } catch (error) {
-                console.error("Error processing PDF:", error);
-                reject(new Error("PDF 파일을 처리하는 중 오류가 발생했습니다. 파일이 손상되었거나 지원되지 않는 형식일 수 있습니다."));
-            }
-        };
+/**
+ * Renders a single page of a PDF document to a high-quality, base64 encoded JPEG image string.
+ * @param page The PDFPageProxy object for the page to render.
+ * @returns A promise that resolves to a data URL string of the rendered image.
+ */
+export const renderPdfPageToImage = async (page: any): Promise<string> => {
+    // A higher scale results in a higher-resolution image, improving OCR quality for the AI.
+    const scale = 6.0; 
+    const viewport = page.getViewport({ scale });
 
-        fileReader.onerror = () => {
-            reject(new Error("Error reading file."));
-        };
+    // Create a temporary canvas to render the PDF page.
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    if (!context) {
+        throw new Error('Could not create canvas context for PDF rendering.');
+    }
 
-        fileReader.readAsArrayBuffer(file);
-    });
+    canvas.height = viewport.height;
+    canvas.width = viewport.width;
+
+    const renderContext = {
+        canvasContext: context,
+        viewport: viewport,
+    };
+
+    await page.render(renderContext).promise;
+
+    // Convert the canvas content to a data URL.
+    // Using JPEG with high quality for a good balance of size and clarity.
+    return canvas.toDataURL('image/jpeg', 0.95);
 };

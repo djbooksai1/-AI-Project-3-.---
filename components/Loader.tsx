@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface LoaderProps {
@@ -5,7 +6,7 @@ interface LoaderProps {
     remainingTime?: number | null;
 }
 
-const formatTime = (totalSeconds: number): string => {
+function formatTime(totalSeconds: number): string {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
     
@@ -15,7 +16,7 @@ const formatTime = (totalSeconds: number): string => {
     return `약 ${seconds}초`;
 }
 
-export const Loader: React.FC<LoaderProps> = ({ status, remainingTime }) => {
+export function Loader({ status, remainingTime }: LoaderProps) {
     return (
         <div className="flex flex-col items-center justify-center p-12 text-center">
             <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-accent"></div>

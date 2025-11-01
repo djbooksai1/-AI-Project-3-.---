@@ -2,12 +2,29 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>해적 - AI 해설지 제작 도우미</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        :root {
+            /* These will be dynamically updated by the ThemeProvider */
+            --color-background: #121212;
+            --color-surface: #1e1e1e;
+            --color-primary: #333333;
+            --color-accent: #00aaff;
+            --color-accent-hover: #0088cc;
+            --color-danger: #ff4444;
+            --color-success: #00c851;
+            --color-text-primary: #e0e0e0;
+            --color-text-secondary: #a0a0a0;
+            --font-family-text: 'Pretendard', sans-serif;
+            --font-family-math: 'serif';
+        }
         body {
-            font-family: 'Pretendard', sans-serif;
+            font-family: var(--font-family-text);
+            background-color: var(--color-background);
+            color: var(--color-text-primary);
         }
         .prose {
             color: inherit;
@@ -15,26 +32,43 @@
         .prose :where(p) {
             margin-top: 0.75em;
             margin-bottom: 0.75em;
+            overflow-wrap: break-word; /* Helps break long strings */
         }
         .prose :where(h1, h2, h3, h4) {
             color: inherit;
         }
+        .qna-line-highlight {
+            outline: 2px solid var(--color-accent);
+            outline-offset: 2px;
+            border-radius: 4px;
+            cursor: help;
+            transition: outline-color 0.3s;
+        }
     </style>
     <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+    <!-- Additional Google Fonts for Theme Editor -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Nanum+Myeongjo&family=Nanum+Gothic&family=IBM+Plex+Sans+KR&family=Noto+Sans+KR&family=Gowun+Dodum&family=Gowun+Batang&family=Do+Hyeon&family=Black+Han+Sans&family=Song+Myung&display=swap" rel="stylesheet">
+    
     <script>
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              'background': '#121212',
-              'surface': '#1e1e1e',
-              'primary': '#333333',
-              'accent': '#00aaff',
-              'accent-hover': '#0088cc',
-              'danger': '#ff4444',
-              'success': '#00c851',
-              'text-primary': '#e0e0e0',
-              'text-secondary': '#a0a0a0',
+              'background': 'var(--color-background)',
+              'surface': 'var(--color-surface)',
+              'primary': 'var(--color-primary)',
+              'accent': 'var(--color-accent)',
+              'accent-hover': 'var(--color-accent-hover)',
+              'danger': 'var(--color-danger)',
+              'success': 'var(--color-success)',
+              'text-primary': 'var(--color-text-primary)',
+              'text-secondary': 'var(--color-text-secondary)',
+            },
+            fontFamily: {
+                sans: ['var(--font-family-text)'],
+                math: ['var(--font-family-math)'],
             },
             animation: {
                 blink: 'blink 1.5s infinite',
@@ -49,10 +83,12 @@
         }
       }
     </script>
-    <!-- PDF.js -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <!-- PDF.js v3.11.174 from jsdelivr for stability -->
+    <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
     <script>
-        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js`;
+        // Set the worker source immediately after the library is loaded.
+        // This is crucial for preventing race conditions and ensuring the worker can be found.
+        pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js`;
     </script>
     <!-- MathJax -->
     <script>
@@ -61,8 +97,9 @@
                 inlineMath: [['$', '$'], ['\\(', '\\)']],
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
             },
-            svg: {
-                fontCache: 'global'
+            chtml: {
+                displayAlign: 'left',
+                displayIndent: '0em'
             },
             startup: {
                 ready: () => {
@@ -71,24 +108,38 @@
             }
         };
     </script>
-    <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
+    
+    <!-- PDF Export Libraries -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <!-- OpenCV.js for Client-Side Computer Vision -->
+    <script async src="https://docs.opencv.org/4.x/opencv.js" id="opencv-script"></script>
+
+
 </head>
 <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
     <div id="root"></div>
 
     <script type="importmap">
-    {
-      "imports": {
-        "react": "https://aistudiocdn.com/react@^19.2.0",
-        "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
-        "react/": "https://aistudiocdn.com/react@^19.2.0/",
-        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.23.0",
-        "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
-        "remark-math": "https://aistudiocdn.com/remark-math@^6.0.0"
-      }
-    }
-    </script>
+{
+  "imports": {
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.23.0",
+    "react-markdown": "https://aistudiocdn.com/react-markdown@^10.1.0",
+    "firebase/app": "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js",
+    "firebase/firestore": "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js",
+    "firebase/storage": "https://www.gstatic.com/firebasejs/10.12.2/firebase-storage.js",
+    "firebase/analytics": "https://www.gstatic.com/firebasejs/10.12.2/firebase-analytics.js",
+    "firebase/auth": "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js",
+    "firebase/": "https://aistudiocdn.com/firebase@^12.4.0/"
+  }
+}
+</script>
     <script type="module" src="/index.tsx"></script>
 </body>
 </html>

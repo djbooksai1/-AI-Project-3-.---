@@ -1,5 +1,9 @@
+
 import React, { useState, useEffect } from 'react';
 import { ADMIN_PASSWORD } from '../constants';
+import { db } from '../firebaseConfig';
+import { doc, setDoc } from 'firebase/firestore';
+
 
 interface GuidelinesModalProps {
     isOpen: boolean;
@@ -8,7 +12,7 @@ interface GuidelinesModalProps {
     setGuidelines: (guidelines: string) => void;
 }
 
-export const GuidelinesModal: React.FC<GuidelinesModalProps> = ({ isOpen, onClose, guidelines, setGuidelines }) => {
+export function GuidelinesModal({ isOpen, onClose, guidelines, setGuidelines }: GuidelinesModalProps) {
     const [password, setPassword] = useState('');
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [error, setError] = useState('');
@@ -36,9 +40,16 @@ export const GuidelinesModal: React.FC<GuidelinesModalProps> = ({ isOpen, onClos
         }
     };
 
-    const handleSave = () => {
-        setGuidelines(localGuidelines);
-        onClose();
+    const handleSave = async () => {
+        try {
+            const guidelinesDocRef = doc(db, 'settings', 'guidelines');
+            await setDoc(guidelinesDocRef, { content: localGuidelines });
+            setGuidelines(localGuidelines);
+            onClose();
+        } catch (error) {
+            console.error("Error saving guidelines to Firestore: ", error);
+            alert("가이드라인 저장에 실패했습니다.");
+        }
     };
 
     if (!isOpen) return null;

@@ -3,13 +3,21 @@ declare global {
   interface Window {
     MathJax: {
       typesetPromise: (nodes?: HTMLElement[]) => Promise<void>;
+      // FIX: Add the optional `startup` property to the MathJax global type.
+      // This is part of the MathJax 3 API and is needed to fix the type error in ExplanationCard.tsx.
+      startup?: {
+        promise: Promise<void>;
+      };
+      // FIX: Add `typesetClear` to the MathJax global type definition.
+      // This is part of the MathJax 3 API and resolves the type error in ExplanationCard.tsx.
+      typesetClear: (nodes?: HTMLElement[]) => void;
     }
   }
 }
 
 import React, { useEffect, useRef, memo } from 'react';
 
-const MathJaxRenderer: React.FC<{ text: string }> = memo(({ text }) => {
+function MathJaxRendererInternal({ text }: { text: string }) {
   const node = useRef<HTMLSpanElement>(null);
 
   useEffect(() => {
@@ -22,6 +30,6 @@ const MathJaxRenderer: React.FC<{ text: string }> = memo(({ text }) => {
   }, [text]);
 
   return <span ref={node} />;
-});
+}
 
-export default MathJaxRenderer;
+export const MathJaxRenderer = memo(MathJaxRendererInternal);
