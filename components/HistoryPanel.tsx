@@ -13,14 +13,14 @@ interface HistoryPanelProps {
 }
 
 const tierDisplayMap: { [key in UserTier]: { name: string; message: string; } } = {
-    free: { name: '연필', message: "해설은 '<span class=\"font-bold text-accent\">연필</span>'로 적고 있습니다." },
-    standard: { name: '샤프', message: "해설은 '<span class=\"font-bold text-accent\">샤프</span>'로 적고 있습니다." },
-    premium: { name: '펜', message: "해설은 '<span class=\"font-bold text-accent\">펜</span>'으로 적고 있습니다." },
-    royal: { name: '분필', message: "해설은 '<span class=\"font-bold text-accent\">분필</span>'로 적고 있습니다." },
+    basic: { name: '베이직', message: "해설은 '<span class=\"font-bold text-accent\">베이직</span>' 플랜으로 적고 있습니다." },
+    standard: { name: '스탠다드', message: "해설은 '<span class=\"font-bold text-accent\">스탠다드</span>' 플랜으로 적고 있습니다." },
+    premium: { name: '프리미엄', message: "해설은 '<span class=\"font-bold text-accent\">프리미엄</span>' 플랜으로 적고 있습니다." },
+    pro: { name: '프로', message: "해설은 '<span class=\"font-bold text-accent\">프로</span>' 플랜으로 적고 있습니다." },
 };
 
 export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, userTier }: HistoryPanelProps) {
-    const currentTierInfo = tierDisplayMap[userTier] || tierDisplayMap.free;
+    const currentTierInfo = tierDisplayMap[userTier] || tierDisplayMap.basic;
 
     const formatDate = (timestamp: any) => {
         if (!timestamp?.toDate) return '날짜 정보 없음';

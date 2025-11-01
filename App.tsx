@@ -1,5 +1,6 @@
 
 
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { GuidelinesModal } from './components/GuidelinesModal';
@@ -53,7 +54,7 @@ const AuthComponent = () => {
                     createdAt: serverTimestamp(),
                     displayName: user.displayName,
                     photoURL: user.photoURL,
-                    tier: 'free', // 기본 등급 부여
+                    tier: 'basic', // 기본 등급 부여
                 });
             }
         } catch (err) {
@@ -142,10 +143,10 @@ const isMobileDevice = (): boolean => {
 
 // [+] 등급별 사용량 제한 설정
 const TIER_LIMITS: { [key in UserTier]: UsageData } = {
-    free: { fast: 5, dajeong: 3, quality: 1 },
+    basic: { fast: 5, dajeong: 3, quality: 1 },
     standard: { fast: Infinity, dajeong: 3, quality: 1 },
     premium: { fast: Infinity, dajeong: Infinity, quality: 3 },
-    royal: { fast: Infinity, dajeong: Infinity, quality: Infinity },
+    pro: { fast: Infinity, dajeong: Infinity, quality: Infinity },
 };
 
 // [+] 오늘 날짜 문자열 생성 (YYYY-MM-DD)
@@ -188,9 +189,9 @@ export function App() {
     const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
 
     // [+] 사용량 제한 관련 상태
-    const [userTier, setUserTier] = useState<UserTier>('free');
+    const [userTier, setUserTier] = useState<UserTier>('basic');
     const [usageData, setUsageData] = useState<UsageData>({ fast: 0, dajeong: 0, quality: 0 });
-    const [tierLimits, setTierLimits] = useState<UsageData>(TIER_LIMITS.free);
+    const [tierLimits, setTierLimits] = useState<UsageData>(TIER_LIMITS.basic);
 
 
     const [explanationMode, setExplanationMode] = useState<ExplanationMode>('dajeong');
@@ -277,9 +278,9 @@ export function App() {
                 const userDocSnap = await getDoc(userDocRef);
                 if (userDocSnap.exists()) {
                     const userData = userDocSnap.data();
-                    const tier = (userData.tier || 'free') as UserTier;
+                    const tier = (userData.tier || 'basic') as UserTier;
                     setUserTier(tier);
-                    setTierLimits(TIER_LIMITS[tier] || TIER_LIMITS.free);
+                    setTierLimits(TIER_LIMITS[tier] || TIER_LIMITS.basic);
                 }
 
                 // 오늘의 사용량 조회
@@ -305,17 +306,48 @@ export function App() {
 
     // Auto-saving logic
     const performSave = useCallback(async () => {
-        if (!isDirty || !user || explanations.length === 0) {
+        if (!isDirty || !user) {
             return;
         }
-
+    
         setSavingStatus('saving');
         setError(null);
-
+    
         try {
+            // Case 1: All explanations have been deleted.
+            if (explanations.length === 0) {
+                // If it was a previously saved set, delete it from Firestore.
+                if (currentExplanationSetId) {
+                    const setIdToDelete = currentExplanationSetId;
+                    setCurrentExplanationSetId(null); // Reset ID immediately
+    
+                    const setDocRef = doc(db, "explanationSets", setIdToDelete);
+                    
+                    // Delete subcollection documents
+                    const explanationsRef = collection(db, "explanationSets", setIdToDelete, "explanations");
+                    const snapshot = await getDocs(explanationsRef);
+                    if (!snapshot.empty) {
+                        const batch = writeBatch(db);
+                        snapshot.forEach(d => batch.delete(d.ref));
+                        await batch.commit();
+                    }
+                    
+                    // Delete the parent document
+                    await deleteDoc(setDocRef);
+    
+                    // Refresh history list
+                    setExplanationSets(prev => prev.filter(s => s.id !== setIdToDelete));
+                }
+                
+                setSavingStatus('idle');
+                setIsDirty(false);
+                return; // Exit after handling deletion.
+            }
+    
+            // Case 2: There are explanations to save/update.
             let setId = currentExplanationSetId;
-
-            // 1. If it's a new set, create the parent document first
+    
+            // If it's a new set, create the parent document first
             if (!setId) {
                 const newSetRef = await addDoc(collection(db, "explanationSets"), {
                     userId: user.uid,
@@ -326,8 +358,8 @@ export function App() {
                 setId = newSetRef.id;
                 setCurrentExplanationSetId(setId);
             }
-
-            // 2. Upload any new images (base64) to Storage
+    
+            // Upload any new images (base64) to Storage
             const explanationsWithImageUrls = await Promise.all(
                 explanations.map(async (exp) => {
                     if (exp.problemImage.startsWith('data:image')) {
@@ -337,38 +369,36 @@ export function App() {
                     return exp;
                 })
             );
-
-            // 3. Batch write all explanations to the subcollection
+    
+            // Batch write all explanations to the subcollection
             const explanationsRef = collection(db, "explanationSets", setId, "explanations");
             const batch = writeBatch(db);
-
+    
             // Simple sync: delete old ones first
-            // FIX: The documentId function must be called to return a FieldPath object.
-            const oldDocsSnapshot = await getDocs(query(explanationsRef, where(documentId(), "!=", "placeholder")));
+            const oldDocsSnapshot = await getDocs(query(explanationsRef));
             oldDocsSnapshot.forEach(doc => batch.delete(doc.ref));
-
+    
             explanationsWithImageUrls.forEach(exp => {
                 const { id, isLoading, isError, ...dataToSave } = exp;
-                const docRef = doc(explanationsRef, exp.docId || undefined); // Use existing docId or create new
+                const docRef = doc(explanationsRef, exp.docId || undefined);
                 batch.set(docRef, { ...dataToSave, problemNumber: exp.problemNumber });
             });
             
-             // Update the count on the parent document
+            // Update the count on the parent document
             const setDocRef = doc(db, "explanationSets", setId);
             batch.update(setDocRef, { explanationCount: explanations.length });
-
-
+    
             await batch.commit();
-
+    
             setSavingStatus('saved');
             setIsDirty(false);
+            
             // Refresh history list
             const setsRef = collection(db, "explanationSets");
             const q = query(setsRef, where("userId", "==", user.uid), orderBy("createdAt", "desc"));
             const querySnapshot = await getDocs(q);
             setExplanationSets(querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as ExplanationSet)));
-
-
+    
         } catch (error) {
             console.error("Auto-save failed:", error);
             setSavingStatus('error');

@@ -37,7 +37,7 @@ export interface UsageData {
     quality: number;
 }
 
-export type UserTier = 'free' | 'standard' | 'premium' | 'royal';
+export type UserTier = 'basic' | 'standard' | 'premium' | 'pro';
 
 export interface UserSelection {
     id: string;

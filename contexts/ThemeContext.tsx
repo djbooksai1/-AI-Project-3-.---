@@ -1,3 +1,4 @@
+
 import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { themes as availableThemes, Theme } from '../config/themes';
 import { textFonts as availableTextFonts, Font } from '../config/fonts';
@@ -119,10 +120,10 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             console.error("Error saving theme settings to Firestore: ", error);
             let errorMessage = "테마 설정을 저장하는 데 실패했습니다.";
             if (error instanceof Error) {
-                errorMessage += `\n\n${error.message}`;
+                errorMessage += "\n\n" + error.message;
             } else {
-                // FIX: The 'error' variable in a catch block is of type 'unknown' and cannot be directly concatenated with a string. It must be explicitly converted to a string first.
-                errorMessage += `\n\n${String(error)}`;
+                // FIX: Explicitly convert the unknown error to a string before concatenation.
+                errorMessage += "\n\n" + String(error);
             }
             alert(errorMessage);
         }

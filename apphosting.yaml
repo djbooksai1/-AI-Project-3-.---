@@ -2,9 +2,9 @@
 # as a static Single Page Application (SPA), resolving the PORT 8080 error
 # that occurs when trying to deploy a static site as a dynamic one.
 
-# Specifies the directory containing the static files to be served.
-# Since index.html is in the root, we point to the root directory.
-publicDir: /
+# Specifies the directory containing the built static files to be served.
+# Vite will compile the project into the 'dist' directory.
+publicDir: dist
 
 # Configures rewrite rules to support client-side routing in the SPA.
 # This rule ensures that all navigation requests are directed to index.html,
