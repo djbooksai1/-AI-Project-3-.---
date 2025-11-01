@@ -23,7 +23,7 @@ const waitForLibraries = (timeout = 10000): Promise<void> => {
                 clearInterval(interval);
                 reject(new Error("PDF 생성 라이브러리(jspdf, html2canvas)를 불러오는 데 실패했습니다."));
             }
-        }, 100);
+        }, 100); 
     });
 };
 
