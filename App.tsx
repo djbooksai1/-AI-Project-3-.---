@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { GuidelinesModal } from './components/GuidelinesModal';
@@ -9,7 +10,7 @@ import { ProblemSelector } from './components/ProblemSelector';
 import { PdfIcon } from './components/icons/PdfIcon';
 import { HwpIcon } from './components/icons/HwpIcon';
 import { exportToPdf, exportToHtml } from './services/exportService';
-import { Explanation, ExplanationMode, ExtractedProblem, UserSelection, QnaData, ExplanationSet, UsageData } from './types';
+import { Explanation, ExplanationMode, ExtractedProblem, UserSelection, QnaData, ExplanationSet, UsageData, UserTier } from './types';
 import { FloatingInput } from './components/FloatingInput';
 import { DEFAULT_GUIDELINES } from './guidelines';
 import { getProcessingService } from './services/processingService';
@@ -29,38 +30,12 @@ import {
 import { QnaPanel } from './components/QnaPanel';
 import { uploadImageFromBase64 } from './services/storageService';
 import { HistoryPanel } from './components/HistoryPanel';
+import { FloatingLogo } from './components/FloatingLogo';
+import { GoogleIcon } from './components/icons/GoogleIcon';
 
 // [+] 인증 UI 컴포넌트
 const AuthComponent = () => {
-    const [isLogin, setIsLogin] = useState(true);
-    const [email, setEmail] = useState('');
-    const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        try {
-            if (isLogin) {
-                await signInWithEmailAndPassword(auth, email, password);
-            } else {
-                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                // 회원가입 성공 시 Firestore에 사용자 문서 생성
-                const user = userCredential.user;
-                await setDoc(doc(db, "users", user.uid), {
-                    email: user.email,
-                    createdAt: serverTimestamp(),
-                    tier: 'free', // 기본 등급 부여
-                });
-            }
-        } catch (err) {
-            if (err instanceof Error) {
-                setError(err.message);
-            } else {
-                setError('An unknown error occurred.');
-            }
-        }
-    };
     
     const handleGoogleLogin = async () => {
         setError('');
@@ -91,82 +66,39 @@ const AuthComponent = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-background">
-            <div className="w-full max-w-md p-8 space-y-8 bg-surface rounded-lg shadow-lg border border-primary">
-                <div>
-                    <h2 className="text-3xl font-extrabold text-center text-accent">
-                        {isLogin ? '로그인' : '회원가입'}
-                    </h2>
-                </div>
-                {error && <p className="text-sm text-center text-danger">{error}</p>}
-                <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
-                    <div className="rounded-md shadow-sm -space-y-px">
-                        <div>
-                            <input
-                                id="email-address"
-                                name="email"
-                                type="email"
-                                autoComplete="email"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-primary bg-background placeholder-text-secondary text-text-primary rounded-t-md focus:outline-none focus:ring-accent focus:border-accent focus:z-10 sm:text-sm"
-                                placeholder="이메일 주소"
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
+        <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
+            <div className="relative">
+                <div className="w-full max-w-md p-8 bg-surface rounded-lg shadow-lg border border-primary">
+                    <div className="text-center space-y-5">
+                        <div className="text-accent">
+                            <h2 className="text-6xl font-black">해.적</h2>
                         </div>
-                        <div>
-                            <input
-                                id="password"
-                                name="password"
-                                type="password"
-                                autoComplete="current-password"
-                                required
-                                className="appearance-none rounded-none relative block w-full px-3 py-2 border border-primary bg-background placeholder-text-secondary text-text-primary rounded-b-md focus:outline-none focus:ring-accent focus:border-accent focus:z-10 sm:text-sm"
-                                placeholder="비밀번호"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
+                        <div className="text-accent">
+                            <p className="text-2xl font-bold">: 해설을, 적다.</p>
                         </div>
-                    </div>
-
-                    <div>
+                        <p className="text-sm text-text-secondary">
+                            대한민국 최고의 문제풀이 및 해설작성 서비스
+                        </p>
+                        {error && <p className="text-sm text-center text-danger">{error}</p>}
+                        
                         <button
-                            type="submit"
-                            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-accent hover:bg-accent-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-accent-hover"
+                            onClick={handleGoogleLogin}
+                            className="w-full inline-flex justify-center items-center py-3 px-4 border border-primary shadow-sm bg-background text-sm font-medium text-text-primary rounded-md hover:bg-primary"
                         >
-                            {isLogin ? '로그인' : '회원가입'}
+                            <GoogleIcon />
+                            Google로 로그인
                         </button>
                     </div>
-                </form>
-                
-                 <div className="relative my-4">
-                    <div className="absolute inset-0 flex items-center">
-                        <div className="w-full border-t border-primary" />
-                    </div>
-                    <div className="relative flex justify-center text-sm">
-                        <span className="px-2 bg-surface text-text-secondary">또는</span>
-                    </div>
                 </div>
-
-                <div>
-                    <button
-                        onClick={handleGoogleLogin}
-                        className="w-full inline-flex justify-center py-2 px-4 border border-primary shadow-sm bg-background text-sm font-medium text-text-primary rounded-md hover:bg-primary"
-                    >
-                        Google로 로그인
-                    </button>
-                </div>
-
-                <div className="text-sm text-center">
-                    <button
-                        onClick={() => {
-                            setIsLogin(!isLogin);
-                            setError('');
-                        }}
-                        className="font-medium text-accent hover:text-accent-hover"
-                    >
-                        {isLogin ? '계정이 없으신가요? 회원가입' : '이미 계정이 있으신가요? 로그인'}
-                    </button>
+                <div className="absolute top-full right-0 mt-4 text-right">
+                     <p className="text-xs text-text-secondary">
+                        Copyright © 2025 Dajeong Intelligence.<br />All Rights Reserved.
+                    </p>
+                    <img 
+                        src="https://793d73a28bf90b83bce0aff088b4b84b.cdn.bubble.io/f1741657290407x311400631094205250/Group%2012726288352.svg" 
+                        alt="Dajeong Intelligence Logo" 
+                        className="w-32 h-auto ml-auto mt-2"
+                    />
                 </div>
             </div>
         </div>
@@ -209,10 +141,11 @@ const isMobileDevice = (): boolean => {
 };
 
 // [+] 등급별 사용량 제한 설정
-const TIER_LIMITS: { [key: string]: UsageData } = {
+const TIER_LIMITS: { [key in UserTier]: UsageData } = {
     free: { fast: 5, dajeong: 3, quality: 1 },
     standard: { fast: Infinity, dajeong: 3, quality: 1 },
-    premium: { fast: Infinity, dajeong: Infinity, quality: 3 }
+    premium: { fast: Infinity, dajeong: Infinity, quality: 3 },
+    royal: { fast: Infinity, dajeong: Infinity, quality: Infinity },
 };
 
 // [+] 오늘 날짜 문자열 생성 (YYYY-MM-DD)
@@ -255,7 +188,7 @@ export function App() {
     const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
 
     // [+] 사용량 제한 관련 상태
-    const [userTier, setUserTier] = useState<'free' | 'standard' | 'premium'>('free');
+    const [userTier, setUserTier] = useState<UserTier>('free');
     const [usageData, setUsageData] = useState<UsageData>({ fast: 0, dajeong: 0, quality: 0 });
     const [tierLimits, setTierLimits] = useState<UsageData>(TIER_LIMITS.free);
 
@@ -344,7 +277,7 @@ export function App() {
                 const userDocSnap = await getDoc(userDocRef);
                 if (userDocSnap.exists()) {
                     const userData = userDocSnap.data();
-                    const tier = userData.tier || 'free';
+                    const tier = (userData.tier || 'free') as UserTier;
                     setUserTier(tier);
                     setTierLimits(TIER_LIMITS[tier] || TIER_LIMITS.free);
                 }
@@ -783,6 +716,7 @@ export function App() {
                 savingStatus={savingStatus}
                 usageData={usageData}
                 tierLimits={tierLimits}
+                isProcessing={isProcessing}
             />
 
             <main className="container mx-auto p-4 md:p-8">
@@ -803,8 +737,9 @@ export function App() {
                     </div>
                 )}
                 
-                <div className="flex flex-row gap-6">
-                    <div className="flex-grow min-w-0">
+                <div className="flex flex-row gap-6 items-start">
+                    {/* Main content column */}
+                    <div className="flex-1 min-w-0">
                         {isProcessing && !showProblemSelector && (
                             <div className="flex justify-center my-12">
                                 <Loader status={statusMessage || '처리 중...'} />
@@ -862,7 +797,6 @@ export function App() {
                                             isSelected={selectedIds.has(exp.id)}
                                             onSelect={toggleSelection}
                                             onOpenQna={handleOpenQna}
-                                            onCloseQna={handleCloseQna}
                                             activeQna={activeQna}
                                         />
                                     ))}
@@ -870,6 +804,18 @@ export function App() {
                             </>
                         )}
                     </div>
+                     {/* Q&A Panel column */}
+                    {explanations.length > 0 && (
+                        <div className="w-96 flex-shrink-0 sticky top-28">
+                            {activeQna && (
+                                <QnaPanel
+                                    key={activeQna.cardId + activeQna.selectedLine}
+                                    data={activeQna}
+                                    onClose={handleCloseQna}
+                                />
+                            )}
+                        </div>
+                    )}
                 </div>
             </main>
             
@@ -891,7 +837,10 @@ export function App() {
                 sets={explanationSets}
                 onLoadSet={loadExplanationSet}
                 onDeleteSet={handleDeleteSet}
+                userTier={userTier}
             />
+            
+            <FloatingLogo />
         </div>
     );
 }

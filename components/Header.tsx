@@ -1,4 +1,5 @@
 
+
 import React from 'react';
 import { PaletteIcon } from './icons/PaletteIcon';
 import { ExplanationMode, UsageData } from '../types';
@@ -18,6 +19,7 @@ interface HeaderProps {
     savingStatus: SavingStatus;
     usageData: UsageData;
     tierLimits: UsageData;
+    isProcessing: boolean;
 }
 
 export function Header({ 
@@ -31,7 +33,8 @@ export function Header({
     onLogout,
     savingStatus,
     usageData,
-    tierLimits
+    tierLimits,
+    isProcessing
 }: HeaderProps) {
     // 여기에서 UI에 표시될 해설 모드의 이름을 자유롭게 변경할 수 있습니다.
     // 'id'는 데이터베이스와 코드 로직에서 사용되는 고유 값이므로 변경해서는 안 됩니다.
@@ -71,11 +74,8 @@ export function Header({
                         <h1 className="text-4xl md:text-5xl font-black text-accent tracking-[0.2em] whitespace-nowrap select-none">
                             해적
                         </h1>
-                        <h2
-                            className="text-xs md:text-sm text-text-secondary mt-1 select-none flex justify-between px-3"
-                        >
-                            <span>해설</span>
-                            <span>적용하기</span>
+                        <h2 className="text-xs md:text-sm text-text-secondary mt-1 select-none text-center tracking-wider">
+                            해.적 : 해설을, 적다.
                         </h2>
                     </button>
                     {user && (
@@ -98,11 +98,12 @@ export function Header({
                                     <button
                                         key={mode.id}
                                         onClick={() => onSetExplanationMode(mode.id)}
+                                        disabled={isProcessing}
                                         className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors whitespace-nowrap relative ${
                                             explanationMode === mode.id
                                                 ? 'bg-accent text-white shadow-sm'
                                                 : 'bg-transparent text-text-secondary hover:bg-primary/50'
-                                        }`}
+                                        } disabled:opacity-50 disabled:cursor-not-allowed`}
                                         title={`${mode.title}\n오늘 남은 횟수: ${remaining}`}
                                     >
                                         {mode.label}
@@ -127,10 +128,10 @@ export function Header({
                             <button
                                 onClick={onOpenHistory}
                                 className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-accent text-white rounded-md hover:bg-accent-hover transition-colors"
-                                title="내 해설 보기"
+                                title="마이페이지"
                             >
                                 <HistoryIcon />
-                                <span className="hidden md:inline">내 해설 보기</span>
+                                <span className="hidden md:inline">마이페이지</span>
                             </button>
                             
                             <button

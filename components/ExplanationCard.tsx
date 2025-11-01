@@ -24,7 +24,6 @@ interface ExplanationCardProps {
     isSelected: boolean;
     onSelect: (id: number) => void;
     onOpenQna: (data: QnaData) => void;
-    onCloseQna: () => void;
     activeQna: QnaData | null;
 }
 
@@ -75,7 +74,7 @@ type VariationState =
     | { status: 'showingProblem'; problem: string; explanation: string }
     | { status: 'error'; message: string };
 
-export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, guidelines, onDelete, onToggleSatisfied, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, onCloseQna, activeQna }) => {
+export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, guidelines, onDelete, onToggleSatisfied, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, activeQna }) => {
     const [copied, setCopied] = useState(false);
     const [isExpanded, setIsExpanded] = useState(true); // Card is expanded by default now
     const cardRootRef = useRef<HTMLDivElement>(null);
@@ -433,92 +432,78 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, g
     return (
         <>
             <style>{dynamicStyles}</style>
-            <div className="flex items-start gap-6">
-                <div className="flex-grow min-w-0">
-                    <div
-                        ref={cardRootRef}
-                        id={id}
-                        className={`explanation-card bg-surface rounded-lg shadow-md overflow-hidden transition-all relative ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? 'border-accent ring-2 ring-accent' : 'border-primary'} ${layout.className}`}
-                        onClick={handleCardClick}
-                    >
-                        <div 
-                            className="explanation-card-header flex justify-between items-center p-4 hover:bg-primary/30 transition-colors cursor-pointer"
-                            onClick={(e) => { if (!isSelectionMode) { e.stopPropagation(); setIsExpanded(!isExpanded); } }}
-                        >
-                            <div className="flex items-center gap-3">
-                                {isSelectionMode && (
-                                    <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={(e) => { e.stopPropagation(); onSelect(explanation.id); }}
-                                        onClick={(e) => e.stopPropagation()}
-                                        className="w-5 h-5 rounded bg-surface border-primary text-accent focus:ring-accent"
-                                    />
-                                )}
-                                <h2 className="text-lg font-bold text-text-primary">
-                                    문제 {problemNumber} <span className="text-sm font-medium text-text-secondary">(원본 {pageNumber}페이지)</span>
-                                </h2>
-                            </div>
-
-                            <div className="flex items-center gap-4">
-                                <div className="flex items-center gap-2">
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); onDelete(explanation.id); }}
-                                        className={`p-2 rounded-full transition-colors bg-primary/50 hover:bg-danger text-text-primary hover:text-white`}
-                                        title="해설 삭제"
-                                        disabled={isLoading}
-                                    >
-                                        <XIcon />
-                                    </button>
-                                    <button
-                                        onClick={(e) => { e.stopPropagation(); onToggleSatisfied(explanation.id); }}
-                                        className={`p-2 rounded-full transition-colors ${explanation.isSatisfied ? 'bg-success text-white' : 'bg-primary/50 hover:bg-success text-text-primary hover:text-white'}`}
-                                        title="해설 만족"
-                                        disabled={isLoading}
-                                    >
-                                        <OIcon />
-                                    </button>
-                                </div>
-                                <div
-                                    className="p-1"
-                                    title={isExpanded ? "접기" : "펼치기"}
-                                >
-                                    {isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                                </div>
-                            </div>
-                        </div>
-                        
-                        {isExpanded && (
-                            <div ref={cardBodyRef} className="explanation-card-body p-4 border-t border-primary/50">
-                                {isLoading ? (
-                                    <div className="flex flex-col items-center justify-center bg-background rounded-md min-h-[22rem]">
-                                        <Loader status={explanation.markdown} remainingTime={remainingTime} />
-                                    </div>
-                                ) : isError ? (
-                                     <div className="p-4 bg-danger/10 text-danger rounded-md min-h-[22rem] flex flex-col justify-center">
-                                         <div className="flex items-center gap-2">
-                                             <div className="w-5 h-5">
-                                                <XIcon />
-                                             </div>
-                                             <h3 className="font-bold text-lg">해설 생성 오류</h3>
-                                         </div>
-                                         <p className="mt-2 text-sm opacity-90">{markdownToRender}</p>
-                                     </div>
-                                ) : (
-                                   cardContent
-                                )}
-                            </div>
+            <div
+                ref={cardRootRef}
+                id={id}
+                className={`explanation-card bg-surface rounded-lg shadow-md overflow-hidden transition-all relative ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? 'border-accent ring-2 ring-accent' : 'border-primary'} ${layout.className}`}
+                onClick={handleCardClick}
+            >
+                <div 
+                    className="explanation-card-header flex justify-between items-center p-4 hover:bg-primary/30 transition-colors cursor-pointer"
+                    onClick={(e) => { if (!isSelectionMode) { e.stopPropagation(); setIsExpanded(!isExpanded); } }}
+                >
+                    <div className="flex items-center gap-3">
+                        {isSelectionMode && (
+                            <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => { e.stopPropagation(); onSelect(explanation.id); }}
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-5 h-5 rounded bg-surface border-primary text-accent focus:ring-accent"
+                            />
                         )}
+                        <h2 className="text-lg font-bold text-text-primary">
+                            문제 {problemNumber} <span className="text-sm font-medium text-text-secondary">(원본 {pageNumber}페이지)</span>
+                        </h2>
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); onDelete(explanation.id); }}
+                                className={`p-2 rounded-full transition-colors bg-primary/50 hover:bg-danger text-text-primary hover:text-white`}
+                                title="해설 삭제"
+                                disabled={isLoading}
+                            >
+                                <XIcon />
+                            </button>
+                            <button
+                                onClick={(e) => { e.stopPropagation(); onToggleSatisfied(explanation.id); }}
+                                className={`p-2 rounded-full transition-colors ${explanation.isSatisfied ? 'bg-success text-white' : 'bg-primary/50 hover:bg-success text-text-primary hover:text-white'}`}
+                                title="해설 만족"
+                                disabled={isLoading}
+                            >
+                                <OIcon />
+                            </button>
+                        </div>
+                        <div
+                            className="p-1"
+                            title={isExpanded ? "접기" : "펼치기"}
+                        >
+                            {isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
+                        </div>
                     </div>
                 </div>
-
-                {isQnaActive && activeQna && (
-                    <div className="w-96 flex-shrink-0">
-                        <QnaPanel
-                            key={activeQna.cardId + activeQna.selectedLine}
-                            data={activeQna}
-                            onClose={onCloseQna}
-                        />
+                
+                {isExpanded && (
+                    <div ref={cardBodyRef} className="explanation-card-body p-4 border-t border-primary/50">
+                        {isLoading ? (
+                            <div className="flex flex-col items-center justify-center bg-background rounded-md min-h-[22rem]">
+                                <Loader status={explanation.markdown} remainingTime={remainingTime} />
+                            </div>
+                        ) : isError ? (
+                             <div className="p-4 bg-danger/10 text-danger rounded-md min-h-[22rem] flex flex-col justify-center">
+                                 <div className="flex items-center gap-2">
+                                     <div className="w-5 h-5">
+                                        <XIcon />
+                                     </div>
+                                     <h3 className="font-bold text-lg">해설 생성 오류</h3>
+                                 </div>
+                                 <p className="mt-2 text-sm opacity-90">{markdownToRender}</p>
+                             </div>
+                        ) : (
+                           cardContent
+                        )}
                     </div>
                 )}
             </div>

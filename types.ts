@@ -2,6 +2,7 @@
 
 
 
+
 export interface ExtractedProblem {
     id?: string; // Optional unique ID for UI management
     type: '객관식' | '주관식';
@@ -35,6 +36,8 @@ export interface UsageData {
     dajeong: number;
     quality: number;
 }
+
+export type UserTier = 'free' | 'standard' | 'premium' | 'royal';
 
 export interface UserSelection {
     id: string;

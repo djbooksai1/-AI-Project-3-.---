@@ -29,14 +29,14 @@ interface ThemeContextType {
 export const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: React.PropsWithChildren) {
-    const [theme, setThemeState] = useState<Theme>(availableThemes[0]);
+    const [theme, setThemeState] = useState<Theme>(availableThemes[5]); // Default to "Paper"
     const [layout, setLayoutState] = useState<Layout>(availableLayouts[0]);
     
     // State for explanation-specific typography and styling
-    const [explanationFontSize, setExplanationFontSizeState] = useState<number>(16);
-    const [explanationMathSize, setExplanationMathSizeState] = useState<number>(100);
-    const [explanationPadding, setExplanationPaddingState] = useState<number>(16);
-    const [explanationTextFont, setExplanationTextFontState] = useState<Font>(availableTextFonts[0]);
+    const [explanationFontSize, setExplanationFontSizeState] = useState<number>(14.5);
+    const [explanationMathSize, setExplanationMathSizeState] = useState<number>(105);
+    const [explanationPadding, setExplanationPaddingState] = useState<number>(24);
+    const [explanationTextFont, setExplanationTextFontState] = useState<Font>(availableTextFonts[1]); // Default to Batang
     const [currentUser, setCurrentUser] = useState<User | null>(null);
 
     // Fetch settings from Firestore on user auth state change
@@ -81,12 +81,12 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
                 fetchThemeSettings(user.uid);
             } else {
                 // User is signed out, reset to defaults
-                setThemeState(availableThemes[0]);
+                setThemeState(availableThemes[5]); // Paper
                 setLayoutState(availableLayouts[0]);
-                setExplanationFontSizeState(16);
-                setExplanationMathSizeState(100);
-                setExplanationPaddingState(16);
-                setExplanationTextFontState(availableTextFonts[0]);
+                setExplanationFontSizeState(14.5);
+                setExplanationMathSizeState(105);
+                setExplanationPaddingState(24);
+                setExplanationTextFontState(availableTextFonts[1]); // Batang
             }
         });
 
@@ -121,6 +121,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             if (error instanceof Error) {
                 errorMessage += `\n\n${error.message}`;
             } else {
+                // FIX: Explicitly cast 'error' to a string before concatenation, as it is of type 'unknown' in a catch block.
                 errorMessage += `\n\n${String(error)}`;
             }
             alert(errorMessage);
@@ -139,7 +140,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
 
     // Set default UI font globally
     useEffect(() => {
-        document.documentElement.style.setProperty('--font-family-text', "'Pretendard', sans-serif");
+        document.documentElement.style.setProperty('--font-family-text', "'KoPubWorldDotum', sans-serif");
     }, []);
 
     const value = useMemo(() => ({

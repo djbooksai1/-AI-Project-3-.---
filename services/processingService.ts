@@ -106,7 +106,15 @@ class ProcessingService {
                 const pageRenderPromises = Array.from({ length: pdf.numPages }, async (_, i) => {
                     const pageNumber = i + 1;
                     const page = await pdf.getPage(pageNumber);
-                    const image = await renderPdfPageToImage(page);
+
+                    // Check for text content to determine if it's a scanned or text-based PDF page.
+                    const textContent = await page.getTextContent();
+                    const isTextBased = textContent.items.length > 50; // Use a threshold of 50 text items.
+                    
+                    // Use a higher scale for scanned PDFs to improve OCR, and a lower scale for text-based for speed.
+                    const renderScale = isTextBased ? 2.0 : 6.0; 
+
+                    const image = await renderPdfPageToImage(page, renderScale);
                     page.cleanup();
                     return { image, pageNumber };
                 });

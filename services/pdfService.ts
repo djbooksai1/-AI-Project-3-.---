@@ -48,11 +48,10 @@ export const getPdfDocument = async (file: File): Promise<any> => {
 /**
  * Renders a single page of a PDF document to a high-quality, base64 encoded JPEG image string.
  * @param page The PDFPageProxy object for the page to render.
+ * @param scale The rendering scale. A higher value results in a higher resolution image.
  * @returns A promise that resolves to a data URL string of the rendered image.
  */
-export const renderPdfPageToImage = async (page: any): Promise<string> => {
-    // A higher scale results in a higher-resolution image, improving OCR quality for the AI.
-    const scale = 6.0; 
+export const renderPdfPageToImage = async (page: any, scale: number = 6.0): Promise<string> => {
     const viewport = page.getViewport({ scale });
 
     // Create a temporary canvas to render the PDF page.

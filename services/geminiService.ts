@@ -84,7 +84,7 @@ export const extractProblemsFromPage = async (pageImageBase64: string): Promise<
             },
         };
 
-        const systemInstruction = `당신은 대한민국 입시 수학 시험지 분석을 위해 특별히 훈련된 '인식전문가' AI입니다. 당신의 유일한 임무는 주어진 시험지 이미지에서 각각의 '문제' 영역을 정확하게 찾아내고, 그 위치를 정규화된 좌표(0.0 ~ 1.0)로 반환하는 것입니다.`;
+        const systemInstruction = `당신은 대한민국 최고의 문제 인식 전문가입니다. 당신의 유일한 임무는 주어진 시험지 이미지에서 각각의 '문제' 영역을 정확하게 찾아내고, 그 위치를 정규화된 좌표(0.0 ~ 1.0)로 반환하는 것입니다.`;
         
         const prompt = `주어진 시험지 이미지에서 모든 수학 문제의 경계 상자(bounding box)를 찾아주세요.
 
