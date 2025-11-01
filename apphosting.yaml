@@ -1,0 +1,14 @@
+# This configuration file instructs Firebase App Hosting to treat this project
+# as a static Single Page Application (SPA), resolving the PORT 8080 error
+# that occurs when trying to deploy a static site as a dynamic one.
+
+# Specifies the directory containing the static files to be served.
+# Since index.html is in the root, we point to the root directory.
+publicDir: /
+
+# Configures rewrite rules to support client-side routing in the SPA.
+# This rule ensures that all navigation requests are directed to index.html,
+# allowing the React application to handle the routing.
+rewrites:
+  - source: "/**"
+    destination: "/index.html"

@@ -121,7 +121,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             if (error instanceof Error) {
                 errorMessage += `\n\n${error.message}`;
             } else {
-                // FIX: Explicitly cast 'error' to a string before concatenation, as it is of type 'unknown' in a catch block.
+                // FIX: The 'error' variable in a catch block is of type 'unknown' and cannot be directly concatenated with a string. It must be explicitly converted to a string first.
                 errorMessage += `\n\n${String(error)}`;
             }
             alert(errorMessage);
