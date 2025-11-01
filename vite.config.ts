@@ -6,6 +6,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 5173,
+    host: true, // 👈 server 블록에도 추가
+    allowedHosts: ['*'] // 👈 server 블록에도 추가
   },
   // 'preview' 설정은 'vite preview' 명령어로 프로덕션 빌드를 실행할 때 적용됩니다.
   preview: {
