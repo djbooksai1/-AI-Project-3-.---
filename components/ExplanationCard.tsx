@@ -1,30 +1,26 @@
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { type Explanation, type QnaData } from '../types';
-import { CopyIcon } from './icons/CopyIcon';
-import { CheckIcon } from './icons/CheckIcon';
-import { OIcon } from './icons/OIcon';
 import { XIcon } from './icons/XIcon';
 import { Loader } from './Loader';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
 import { ChevronUpIcon } from './icons/ChevronUpIcon';
 import { useTheme } from '../hooks/useTheme';
 import { generateVariationProblem, extractCoreIdeas } from '../services/geminiService';
-import { RetryIcon } from './icons/RetryIcon';
-import { QnaPanel } from './QnaPanel';
+import { CheckIcon } from './icons/CheckIcon';
 
 interface ExplanationCardProps {
     explanation: Explanation;
     guidelines: string;
     onDelete: (id: number) => void;
-    onToggleSatisfied: (id: number) => void;
+    onSave: (id: number) => void;
+    isSaving: boolean;
     setRenderedContentRef: (el: HTMLDivElement | null) => void;
     id: string;
     isSelectionMode: boolean;
     isSelected: boolean;
     onSelect: (id: number) => void;
     onOpenQna: (data: QnaData) => void;
-    activeQna: QnaData | null;
 }
 
 interface ImageModalProps {
@@ -63,7 +59,6 @@ const ImageModal: React.FC<ImageModalProps> = ({ isOpen, onClose, imageUrl, altT
     );
 };
 
-
 type VariationLevel = 'numeric' | 'form' | 'creative';
 
 type VariationState =
@@ -74,12 +69,57 @@ type VariationState =
     | { status: 'showingProblem'; problem: string; explanation: string }
     | { status: 'error'; message: string };
 
-export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, guidelines, onDelete, onToggleSatisfied, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, activeQna }) => {
-    const [copied, setCopied] = useState(false);
-    const [isExpanded, setIsExpanded] = useState(true); // Card is expanded by default now
-    const cardRootRef = useRef<HTMLDivElement>(null);
+// [+] 문장 단위 클릭을 위한 래퍼 컴포넌트
+const SentenceWrapper: React.FC<React.PropsWithChildren<{ onSentenceClick: (event: React.MouseEvent<HTMLElement>) => void }>> = ({ children, onSentenceClick }) => {
+    const interactiveClass = "cursor-pointer transition-colors duration-200 hover:bg-primary/30 rounded";
+
+    // 재귀적으로 React 노드를 순회하며 텍스트 노드를 찾아 문장 단위로 분할하고 span으로 감쌉니다.
+    const processChildren = (nodes: React.ReactNode): React.ReactNode => {
+        return React.Children.map(nodes, (child, index) => {
+            if (typeof child === 'string') {
+                // 문장 분리 로직: 구두점(.?!)을 기준으로 나누고, 구두점은 문장에 포함시킵니다.
+                const parts = child.split(/([.?!])/);
+                const sentences: string[] = [];
+                for (let i = 0; i < parts.length; i += 2) {
+                    if (i + 1 < parts.length) {
+                        sentences.push(parts[i] + parts[i + 1]);
+                    } else if (parts[i].trim()) {
+                        sentences.push(parts[i]);
+                    }
+                }
+                
+                return sentences.map((sentence, sIndex) => {
+                     if (!sentence.trim()) return <React.Fragment key={`${index}-${sIndex}`}>{sentence}</React.Fragment>;
+                     return (
+                        <span key={`${index}-${sIndex}`} onClick={onSentenceClick} className={interactiveClass}>
+                            {sentence}
+                        </span>
+                     );
+                });
+            }
+
+            if (React.isValidElement(child)) {
+                // `code` 태그와 같은 특정 요소는 문장 분할에서 제외합니다.
+                if (child.type === 'code' || (child.props as any)?.node?.tagName === 'code') {
+                    return child;
+                }
+                return React.cloneElement(child as React.ReactElement<any>, {
+                    // 자식 노드에 대해 재귀적으로 함수를 호출합니다.
+                    children: processChildren(child.props.children)
+                });
+            }
+
+            return child;
+        });
+    };
+
+    return <>{processChildren(children)}</>;
+};
+
+
+export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, guidelines, onDelete, onSave, isSaving, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna }) => {
+    const [isExpanded, setIsExpanded] = useState(true);
     const renderedContentRef = useRef<HTMLDivElement>(null);
-    const cardBodyRef = useRef<HTMLDivElement>(null);
     const variationContentRef = useRef<HTMLDivElement>(null);
     const { isLoading, pageNumber, problemNumber, problemImage, isError } = explanation;
     const { 
@@ -92,427 +132,265 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, g
     
     const [variationState, setVariationState] = useState<VariationState>({ status: 'idle' });
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-    
-    const highlightedElementRef = useRef<HTMLElement | null>(null);
 
-    const isQnaActive = useMemo(() => activeQna?.cardId === explanation.id, [activeQna, explanation.id]);
-
-
-    const AVERAGE_EXPLANATION_TIME = 25; // seconds
-    const [remainingTime, setRemainingTime] = useState<number | null>(null);
-
-    useEffect(() => {
-        let timer: number | undefined;
-        if (isLoading) {
-            setRemainingTime(AVERAGE_EXPLANATION_TIME);
-            timer = window.setInterval(() => {
-                setRemainingTime(prev => (prev !== null && prev > 1 ? prev - 1 : 0));
-            }, 1000);
-        } else {
-            setRemainingTime(null);
-        }
-        return () => clearInterval(timer);
-    }, [isLoading]);
-
-
-    useEffect(() => {
-        if (setRenderedContentRef) {
-            setRenderedContentRef(renderedContentRef.current);
-        }
+    useLayoutEffect(() => {
+        setRenderedContentRef(renderedContentRef.current);
         return () => {
-             if (setRenderedContentRef) {
-                setRenderedContentRef(null);
-             }
-        }
-    }, [setRenderedContentRef]);
-    
-    useEffect(() => {
-        // When the active Q&A session changes globally,
-        // check if this card should clear its highlight.
-        if (!isQnaActive && highlightedElementRef.current) {
-            highlightedElementRef.current.classList.remove('qna-line-highlight');
-            highlightedElementRef.current = null;
-        }
-    }, [isQnaActive]);
-
-    const typesetMath = (element: HTMLElement | null) => {
-        if (!element) return;
-        
-        const typeset = () => {
-             if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
-                window.MathJax.typesetClear([element]);
-                window.MathJax.typesetPromise([element]).catch((err) =>
-                    console.error('MathJax typeset error:', err)
-                );
-            }
+            setRenderedContentRef(null);
         };
-
-        if (window.MathJax?.startup?.promise) {
-            window.MathJax.startup.promise.then(typeset);
-        } else {
-            typeset();
-        }
-    }
-
-    useLayoutEffect(() => {
-        if (isExpanded && !isLoading && !isError) {
-            typesetMath(renderedContentRef.current);
-        }
-    }, [explanation.markdown, isExpanded, isLoading, isError]);
-
-    useLayoutEffect(() => {
-        if (isExpanded && variationState.status === 'showingProblem') {
-            typesetMath(variationContentRef.current);
-        }
-    }, [variationState, isExpanded]);
-
-    const markdownToRender = useMemo(() => {
-        const match = explanation.markdown.match(/^```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/);
-        return match ? match[1].trim() : explanation.markdown.trim();
-    }, [explanation.markdown]);
-
-
-    const handleCopy = () => {
-        navigator.clipboard.writeText(markdownToRender);
-        setCopied(true);
-    };
+    }, [setRenderedContentRef]);
 
     useEffect(() => {
-        if (copied) {
-            const timer = setTimeout(() => setCopied(false), 2000);
-            return () => clearTimeout(timer);
+        if (isExpanded && renderedContentRef.current && window.MathJax?.typesetPromise) {
+            window.MathJax.typesetPromise([renderedContentRef.current]).catch(err => console.error("MathJax typeset error:", err));
         }
-    }, [copied]);
-
-    const handleCardClick = () => {
-        if (isSelectionMode) {
-            onSelect(explanation.id);
+        if (variationState.status === 'showingProblem' && variationContentRef.current && window.MathJax?.typesetPromise) {
+            window.MathJax.typesetPromise([variationContentRef.current]).catch(err => console.error("MathJax typeset error on variation:", err));
         }
-    };
-    
-    const handleLineClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
-        event.stopPropagation();
-        
-        if (highlightedElementRef.current) {
-            highlightedElementRef.current.classList.remove('qna-line-highlight');
-        }
+    }, [explanation.markdown, isExpanded, explanationFontSize, explanationMathSize, explanationTextFont, variationState]);
 
-        const element = event.currentTarget;
-        const text = element.textContent?.trim();
-        const html = element.innerHTML;
-        const cardBody = cardBodyRef.current;
+    const handleTextClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+        if (isSelectionMode) return;
+        event.stopPropagation(); // 부모 요소의 클릭 이벤트 방지
 
+        const target = event.currentTarget;
+        const selectedText = target.innerText;
+        const selectedHtml = target.innerHTML;
 
-        if (text && text.length > 5 && cardBody) { // Ignore clicks on very short/empty lines
-            element.classList.add('qna-line-highlight');
-            highlightedElementRef.current = element;
-            
+        if (selectedText && selectedText.trim().length > 0) {
             onOpenQna({
                 cardId: explanation.id,
-                selectedLine: text,
-                selectedLineHtml: html,
-                sourceHeight: cardBody.clientHeight,
                 problemText: explanation.originalProblemText,
-                fullExplanation: markdownToRender,
+                fullExplanation: explanation.markdown,
+                selectedLine: selectedText,
+                selectedLineHtml: selectedHtml,
             });
         }
-    }, [onOpenQna, explanation.id, explanation.originalProblemText, markdownToRender]);
-    
-    // FIX: Replaced the ClickableWrapper component by applying onClick handlers and classes directly to the markdown elements. This fixes multiple TypeScript errors and avoids creating invalid HTML structures (e.g., div inside ul).
-    const markdownComponents: Components = useMemo(() => ({
-        code({ node, inline, className, children, ...props }) {
-            const match = /language-(\w+)/.exec(className || '');
-            if (match && match[1] === 'svg') {
-                const svgCode = String(children).replace(/\n$/, '');
-                return <div className="my-4 p-4 bg-white rounded-md overflow-auto" dangerouslySetInnerHTML={{ __html: svgCode }} />;
-            }
-            if (inline) {
-                 return <code className={`${className || ''} cursor-help rounded-sm`} {...props} onClick={handleLineClick}>{children}</code>;
-            }
-            return (
-                 <pre onClick={handleLineClick} className="bg-background p-2 rounded-md my-2 overflow-auto cursor-help rounded-sm">
-                    <code className={className} {...props}>{children}</code>
-                </pre>
-            );
-        },
-        p: ({ node, children, ...props }) => <p {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</p>,
-        li: ({ node, children, ...props }) => <li {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</li>,
-        blockquote: ({ node, children, ...props }) => <blockquote {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</blockquote>,
-        h1: ({ node, children, ...props }) => <h1 {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</h1>,
-        h2: ({ node, children, ...props }) => <h2 {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</h2>,
-        h3: ({ node, children, ...props }) => <h3 {...props} onClick={handleLineClick} className="cursor-help rounded-sm">{children}</h3>,
-    }), [handleLineClick]);
+    }, [onOpenQna, explanation, isSelectionMode]);
 
+    const renderMarkdown = useMemo((): Components => {
+        // 제네릭 렌더러 컴포넌트: 자식들을 SentenceWrapper로 감쌉니다.
+        const TextBlockRenderer: React.FC<React.PropsWithChildren<{ as: React.ElementType, className?: string }>> = ({ as: Component, children, ...props }) => {
+            return (
+                <Component {...props}>
+                    <SentenceWrapper onSentenceClick={handleTextClick}>{children}</SentenceWrapper>
+                </Component>
+            );
+        };
+
+        return {
+            p: (props) => <TextBlockRenderer as="p" {...props} className="my-2" />,
+            h1: (props) => <TextBlockRenderer as="h1" {...props} className="text-xl font-bold my-3" />,
+            h2: (props) => <TextBlockRenderer as="h2" {...props} className="text-lg font-bold my-3" />,
+            h3: (props) => <TextBlockRenderer as="h3" {...props} className="text-base font-bold my-2" />,
+            h4: (props) => <TextBlockRenderer as="h4" {...props} className="text-base font-semibold my-2" />,
+            li: (props) => <TextBlockRenderer as="li" {...props} className="pl-1" />,
+            blockquote: (props) => <TextBlockRenderer as="blockquote" {...props} className="border-l-4 border-accent pl-4 italic text-text-secondary my-2" />,
+            td: (props) => <TextBlockRenderer as="td" {...props} className="border border-primary px-3 py-1.5" />,
+
+            // 문장 분할이 필요 없는 요소들은 그대로 둡니다.
+            strong: ({ node, ...props }) => <strong className="font-bold" {...props} />,
+            em: ({ node, ...props }) => <em className="italic" {...props} />,
+            ul: ({ node, ...props }) => <ul className="list-disc pl-5 my-2 space-y-1" {...props} />,
+            ol: ({ node, ...props }) => <ol className="list-decimal pl-5 my-2 space-y-1" {...props} />,
+            code: ({ node, inline, ...props }) => {
+                const codeBlock = <code {...props} />;
+                if (inline) {
+                    return <span className={`bg-primary/50 text-text-primary px-1 py-0.5 rounded text-sm`}>{codeBlock}</span>;
+                }
+                // 코드 블록 전체를 클릭하여 질문할 수 있도록 남겨둡니다.
+                return <pre onClick={handleTextClick} className={`bg-background p-3 rounded-md overflow-x-auto text-sm cursor-pointer transition-colors duration-200 hover:bg-primary/30`}><code {...props} /></pre>;
+            },
+            table: ({ node, ...props }) => (
+                <div className="overflow-x-auto my-3">
+                    <table className="table-auto w-full border-collapse border border-primary" {...props} />
+                </div>
+            ),
+            th: ({ node, ...props }) => <th className="border border-primary px-3 py-1.5 bg-surface text-left font-semibold" {...props} />,
+        };
+    }, [handleTextClick]);
 
     const handleGenerateVariation = async (level: VariationLevel, idea?: string) => {
-        if (!explanation.originalProblemText) {
-            setVariationState({ status: 'error', message: "변형 문제를 생성하기 위한 원본 문제 텍스트가 없습니다." });
-            return;
-        }
         setVariationState({ status: 'generatingProblem', level, idea });
         try {
             const result = await generateVariationProblem(explanation.originalProblemText, guidelines, level, idea);
-            setVariationState({ status: 'showingProblem', ...result });
+            setVariationState({ status: 'showingProblem', problem: result.problem, explanation: result.explanation });
         } catch (e) {
-            setVariationState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+            setVariationState({ status: 'error', message: e instanceof Error ? e.message : 'An unknown error occurred' });
         }
     };
-    
-    const handleStartIdeaGeneration = async (level: 'form' | 'creative') => {
-        if (!explanation.originalProblemText) {
-            setVariationState({ status: 'error', message: "핵심 아이디어를 추출하기 위한 원본 문제 텍스트가 없습니다." });
-            return;
-        }
+
+    const handleChooseIdea = async (level: 'form' | 'creative') => {
         setVariationState({ status: 'fetchingIdeas', level });
         try {
             const ideas = await extractCoreIdeas(explanation.originalProblemText);
-            if (ideas.length === 0) {
-                setVariationState({ status: 'error', message: "핵심 아이디어를 추출할 수 없습니다. 문제가 너무 간단하거나 인식이 불안정할 수 있습니다." });
-            } else {
-                setVariationState({ status: 'showingIdeas', level, ideas });
-            }
+            setVariationState({ status: 'showingIdeas', level, ideas });
         } catch (e) {
-            setVariationState({ status: 'error', message: e instanceof Error ? e.message : String(e) });
+            setVariationState({ status: 'error', message: e instanceof Error ? e.message : 'An unknown error occurred' });
         }
     };
-
-    const dynamicStyles = `
-      #${id} .prose {
-        font-size: ${explanationFontSize}px !important;
-        font-family: ${explanationTextFont.family} !important;
-      }
-      /* Prevent custom font from interfering with MathJax's font stack */
-      #${id} .prose mjx-container {
-        font-family: initial !important;
-        /* Use font-size for robust scaling instead of non-standard zoom */
-        font-size: ${explanationMathSize}% !important;
-      }
-    `;
-
-    const renderVariationGenerator = () => {
+    
+    const renderVariationContent = () => {
         switch (variationState.status) {
             case 'idle':
                 return (
-                    <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2">
-                        <button onClick={() => handleGenerateVariation('numeric')} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-primary text-white rounded-md hover:bg-primary/80 transition-colors">1. 숫자 변형</button>
-                        <button onClick={() => handleStartIdeaGeneration('form')} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-accent text-white rounded-md hover:bg-accent-hover transition-colors">2. 형태 변형</button>
-                        <button onClick={() => handleStartIdeaGeneration('creative')} className="flex-1 sm:flex-none justify-center flex items-center gap-2 px-4 py-2 text-sm font-semibold bg-success text-white rounded-md hover:bg-success/80 transition-colors">3. AI 창작</button>
+                    <div className="flex flex-col sm:flex-row gap-3">
+                        <button onClick={() => handleGenerateVariation('numeric')} className="flex-1 px-3 py-2 text-sm font-semibold bg-primary/50 text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors">숫자만 바꾸기</button>
+                        <button onClick={() => handleChooseIdea('form')} className="flex-1 px-3 py-2 text-sm font-semibold bg-primary/50 text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors">표현만 바꾸기</button>
+                        <button onClick={() => handleChooseIdea('creative')} className="flex-1 px-3 py-2 text-sm font-semibold bg-primary/50 text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors">새롭게 만들기</button>
                     </div>
                 );
             case 'fetchingIdeas':
-                return <div className="mt-4"><Loader status="AI가 핵심 아이디어를 추출하고 있습니다..." /></div>;
-
+                return <div className="text-center"><Loader status="문제의 핵심 아이디어 분석 중..." /></div>;
             case 'showingIdeas':
                 return (
-                    <div className="mt-4 p-4 bg-background rounded-md border border-primary">
-                        <h4 className="font-bold text-text-primary mb-3">어떤 아이디어를 중심으로 변형할까요?</h4>
-                        <div className="flex flex-col items-stretch gap-2">
-                            {variationState.ideas.map((idea, index) => (
-                                <button key={index} onClick={() => handleGenerateVariation(variationState.level, idea)} className="w-full text-left px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors border border-primary/50">
-                                    {idea}
-                                </button>
-                            ))}
-                        </div>
-                         <div className="text-right mt-3">
-                            <button onClick={() => setVariationState({ status: 'idle' })} className="text-sm text-text-secondary hover:text-text-primary">취소</button>
-                        </div>
+                    <div className="space-y-3">
+                        <p className="font-semibold text-text-primary">어떤 아이디어를 변형할까요?</p>
+                        {variationState.ideas.map((idea, index) => (
+                            <button key={index} onClick={() => handleGenerateVariation(variationState.level, idea)} className="w-full text-left px-4 py-3 text-sm bg-primary/50 text-text-primary rounded-md hover:bg-accent hover:text-white transition-colors">
+                                {idea}
+                            </button>
+                        ))}
+                        <button onClick={() => setVariationState({ status: 'idle' })} className="w-full text-center mt-2 text-xs text-text-secondary hover:underline">취소</button>
                     </div>
                 );
-
             case 'generatingProblem':
-                return <div className="mt-4"><Loader status="AI가 변형 문제를 생성하고 있습니다..." /></div>;
-
+                return <div className="text-center"><Loader status="AI가 변형 문제를 생성하는 중..." /></div>;
+            case 'showingProblem':
+                return (
+                    <div ref={variationContentRef} className="prose max-w-none text-text-primary" style={{ fontSize: `${explanationFontSize}px`, fontFamily: explanationTextFont.family }}>
+                        <h4 className="font-bold text-accent">변형 문제</h4>
+                        <ReactMarkdown components={renderMarkdown}>{variationState.problem}</ReactMarkdown>
+                        <h4 className="font-bold text-accent mt-4">변형 문제 해설</h4>
+                        <ReactMarkdown components={renderMarkdown}>{variationState.explanation}</ReactMarkdown>
+                        <button onClick={() => setVariationState({ status: 'idle' })} className="w-full text-center mt-4 px-4 py-2 bg-primary/50 text-text-primary text-sm font-semibold rounded-md hover:bg-primary transition-colors">
+                            다른 변형 문제 만들기
+                        </button>
+                    </div>
+                );
             case 'error':
                 return (
-                    <div className="mt-4 p-4 bg-danger/10 text-danger rounded-md">
-                        <h4 className="font-bold">오류 발생</h4>
-                        <p className="text-sm my-2">{variationState.message}</p>
-                        <div className="text-right">
-                            <button onClick={() => setVariationState({ status: 'idle' })} className="px-3 py-1 bg-danger text-white text-sm font-semibold rounded hover:bg-danger/80">
-                                다시 시도
+                    <div className="text-center">
+                        <p className="text-danger text-sm mb-3">오류: {variationState.message}</p>
+                        <button onClick={() => setVariationState({ status: 'idle' })} className="px-4 py-2 bg-primary text-text-primary text-sm rounded-md">다시 시도</button>
+                    </div>
+                );
+        }
+    };
+    
+    return (
+        <div id={id} className={`bg-surface rounded-xl shadow-md transition-all duration-300 border ${isSelectionMode && isSelected ? 'border-accent ring-2 ring-accent' : 'border-primary'}`}>
+            <ImageModal isOpen={isImageModalOpen} onClose={() => setIsImageModalOpen(false)} imageUrl={problemImage} altText={`문제 ${problemNumber}`} />
+            <div 
+                className={`flex items-start gap-4 p-4 cursor-pointer ${isSelectionMode ? 'select-none' : ''}`} 
+                onClick={() => isSelectionMode ? onSelect(explanation.id) : setIsExpanded(!isExpanded)}
+            >
+                 {isSelectionMode && (
+                    <input 
+                        type="checkbox" 
+                        checked={isSelected} 
+                        onChange={() => onSelect(explanation.id)} 
+                        className="h-5 w-5 rounded border-primary bg-background text-accent focus:ring-accent mt-1"
+                    />
+                )}
+                <div className="flex-grow">
+                    <div className="flex justify-between items-start">
+                        <h3 className="text-lg font-bold text-accent mb-2">해적지도</h3>
+                        <div className="flex items-center gap-4">
+                            <span className="text-xs text-text-secondary">
+                                {pageNumber}페이지 - {problemNumber < 1000 ? `${problemNumber}번 문제` : '번호 인식 불가'}
+                            </span>
+                            <button className="text-text-secondary hover:text-text-primary">
+                                {isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
                             </button>
                         </div>
                     </div>
-                );
-            
-            case 'showingProblem':
-                 return (
-                        <div ref={variationContentRef} className="mt-6 space-y-4 border-t-2 border-dashed border-primary pt-4">
-                            <div className="space-y-2">
-                                <div className="flex justify-between items-center">
-                                    <h3 className="text-lg font-semibold text-success p-1">생성된 변형문제</h3>
-                                    <button onClick={() => setVariationState({ status: 'idle' })} className="flex items-center gap-1.5 px-3 py-1 text-sm font-semibold bg-primary rounded-md hover:bg-primary/80 transition-colors">
-                                        <RetryIcon />
-                                        새로 만들기
-                                    </button>
-                                </div>
-                                 <div className="bg-background rounded-md p-4 border border-primary">
-                                    <div className="prose prose-sm max-w-none text-text-primary">
-                                        <ReactMarkdown components={markdownComponents}>
-                                            {variationState.problem}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
+                    <div className="flex justify-center bg-background rounded-md border border-primary mb-2">
+                        <img 
+                            src={problemImage} 
+                            alt={`문제 ${problemNumber}`} 
+                            className="max-h-96 object-contain cursor-zoom-in"
+                            onClick={(e) => {
+                                if (!isSelectionMode) {
+                                    e.stopPropagation();
+                                    setIsImageModalOpen(true);
+                                }
+                            }}
+                        />
+                    </div>
+                </div>
+            </div>
+
+            {isExpanded && (
+                <div className="p-4 border-t border-primary/50 relative">
+                    <div 
+                        ref={renderedContentRef}
+                        className="prose max-w-none text-text-primary break-words"
+                        style={{ 
+                            fontSize: `${explanationFontSize}px`, 
+                            fontFamily: explanationTextFont.family,
+                            paddingLeft: `${explanationPadding}px`,
+                            paddingRight: `${explanationPadding}px`,
+                            '--tw-prose-bullets': 'var(--color-text-primary)',
+                            '--tw-prose-counters': 'var(--color-text-primary)',
+                            '--tw-prose-hr': 'var(--color-primary)',
+                            '--tw-prose-pre-bg': 'var(--color-background)',
+                        }}
+                    >
+                         {isLoading ? (
+                            <div className="flex justify-center items-center py-8">
+                                <Loader status={explanation.markdown} />
                             </div>
-                             <div className="space-y-2">
-                                <h3 className="text-lg font-semibold text-success p-1">변형문제 해설</h3>
-                                 <div className="bg-background rounded-md p-4 border-2 border-success">
-                                    <div className="prose prose-sm max-w-none text-text-primary">
-                                        <ReactMarkdown components={markdownComponents}>
-                                            {variationState.explanation}
-                                        </ReactMarkdown>
-                                    </div>
-                                </div>
+                        ) : isError ? (
+                             <div className="bg-danger/10 border border-danger text-danger p-4 rounded-md">
+                                <strong className="font-bold">해설 생성 오류</strong>
+                                <p className="text-sm mt-1">{explanation.markdown}</p>
                             </div>
-                        </div>
-                    );
+                        ) : (
+                            <ReactMarkdown
+                                components={renderMarkdown}
+                                remarkPlugins={[]}
+                                rehypePlugins={[]}
+                            >
+                                {explanation.markdown}
+                            </ReactMarkdown>
+                        )}
+                    </div>
 
-            default:
-                return null;
-        }
-    };
-
-
-    const cardContent = (
-        <div className={`explanation-card-content ${layout.className === 'side-by-side' ? 'md:grid md:grid-cols-2 md:gap-6' : 'space-y-6'}`}>
-            {/* Problem Image Section */}
-            <div className="space-y-2">
-                <h3 className="text-lg font-semibold text-accent p-1">인식된 문제</h3>
-                <div className="p-2 bg-background rounded-md border-2 border-primary flex items-center justify-center">
-                    {problemImage ? (
-                        <button onClick={() => setIsImageModalOpen(true)} className="focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-background focus:ring-accent rounded-sm">
-                            <img src={problemImage} alt={`Problem ${problemNumber}`} className="max-w-md h-auto rounded cursor-zoom-in" />
-                        </button>
-                    ) : (
-                        <div className="w-full h-48 flex items-center justify-center text-text-secondary">
-                            문제 이미지를 불러오는 중...
+                    {/* Variation generation UI */}
+                    {!isLoading && !isError && (
+                        <div className="mt-4 pt-4 border-t border-primary/30" style={{ paddingLeft: `${explanationPadding}px`, paddingRight: `${explanationPadding}px` }}>
+                            <div className="bg-background p-4 rounded-lg">
+                                 <h4 className="text-base font-semibold text-center text-text-primary mb-3">유사/변형문제 생성</h4>
+                                 {renderVariationContent()}
+                            </div>
                         </div>
                     )}
                 </div>
-            </div>
+            )}
             
-            {/* Explanations Section */}
-            <div className="space-y-4">
-                {/* Pirate Map Preview */}
-                <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                         <h3 className="text-lg font-semibold text-accent p-1">해적지도</h3>
-                         <button 
-                            onClick={(e) => { e.stopPropagation(); handleCopy(); }} 
-                            className="flex items-center gap-2 px-3 py-1 text-xs font-semibold bg-primary rounded-md hover:bg-primary/80 transition-colors"
+            <div className="flex justify-between items-center bg-background p-3 rounded-b-lg border-t border-primary/50" style={{ paddingLeft: `${explanationPadding}px`, paddingRight: `${explanationPadding}px` }}>
+                <div className="flex items-center gap-4">
+                     {explanation.docId ? (
+                        <span className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-success">
+                            <CheckIcon /> 저장됨
+                        </span>
+                    ) : (
+                        <button 
+                            onClick={() => onSave(explanation.id)}
+                            disabled={isSaving}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold rounded-md transition-colors bg-accent text-white hover:bg-accent-hover disabled:opacity-50"
                         >
-                            {copied ? <CheckIcon /> : <CopyIcon />}
-                            {copied ? '복사됨!' : 'Markdown 복사'}
+                            {isSaving ? '저장 중...' : '저장하기'}
                         </button>
-                    </div>
-                    <div 
-                        ref={renderedContentRef} 
-                        className="bg-background rounded-md min-h-[10rem] border-2 border-accent"
-                        style={{
-                            paddingTop: '1rem',
-                            paddingBottom: '1rem',
-                            paddingLeft: `${explanationPadding}px`,
-                            paddingRight: `${explanationPadding}px`,
-                        }}
-                    >
-                        <div className="prose prose-sm max-w-none text-text-primary">
-                            <ReactMarkdown components={markdownComponents}>
-                                {markdownToRender}
-                            </ReactMarkdown>
-                        </div>
-                    </div>
-                    
-                    {renderVariationGenerator()}
-
+                    )}
                 </div>
+
+                <button onClick={() => onDelete(explanation.id)} className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold bg-danger/20 text-danger rounded-md hover:bg-danger/30 transition-colors">
+                    <XIcon/>
+                    삭제
+                </button>
             </div>
         </div>
-    );
-    
-    return (
-        <>
-            <style>{dynamicStyles}</style>
-            <div
-                ref={cardRootRef}
-                id={id}
-                className={`explanation-card bg-surface rounded-lg shadow-md overflow-hidden transition-all relative ${isSelectionMode ? 'cursor-pointer' : ''} ${isSelected ? 'border-accent ring-2 ring-accent' : 'border-primary'} ${layout.className}`}
-                onClick={handleCardClick}
-            >
-                <div 
-                    className="explanation-card-header flex justify-between items-center p-4 hover:bg-primary/30 transition-colors cursor-pointer"
-                    onClick={(e) => { if (!isSelectionMode) { e.stopPropagation(); setIsExpanded(!isExpanded); } }}
-                >
-                    <div className="flex items-center gap-3">
-                        {isSelectionMode && (
-                            <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={(e) => { e.stopPropagation(); onSelect(explanation.id); }}
-                                onClick={(e) => e.stopPropagation()}
-                                className="w-5 h-5 rounded bg-surface border-primary text-accent focus:ring-accent"
-                            />
-                        )}
-                        <h2 className="text-lg font-bold text-text-primary">
-                            문제 {problemNumber} <span className="text-sm font-medium text-text-secondary">(원본 {pageNumber}페이지)</span>
-                        </h2>
-                    </div>
-
-                    <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); onDelete(explanation.id); }}
-                                className={`p-2 rounded-full transition-colors bg-primary/50 hover:bg-danger text-text-primary hover:text-white`}
-                                title="해설 삭제"
-                                disabled={isLoading}
-                            >
-                                <XIcon />
-                            </button>
-                            <button
-                                onClick={(e) => { e.stopPropagation(); onToggleSatisfied(explanation.id); }}
-                                className={`p-2 rounded-full transition-colors ${explanation.isSatisfied ? 'bg-success text-white' : 'bg-primary/50 hover:bg-success text-text-primary hover:text-white'}`}
-                                title="해설 만족"
-                                disabled={isLoading}
-                            >
-                                <OIcon />
-                            </button>
-                        </div>
-                        <div
-                            className="p-1"
-                            title={isExpanded ? "접기" : "펼치기"}
-                        >
-                            {isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
-                        </div>
-                    </div>
-                </div>
-                
-                {isExpanded && (
-                    <div ref={cardBodyRef} className="explanation-card-body p-4 border-t border-primary/50">
-                        {isLoading ? (
-                            <div className="flex flex-col items-center justify-center bg-background rounded-md min-h-[22rem]">
-                                <Loader status={explanation.markdown} remainingTime={remainingTime} />
-                            </div>
-                        ) : isError ? (
-                             <div className="p-4 bg-danger/10 text-danger rounded-md min-h-[22rem] flex flex-col justify-center">
-                                 <div className="flex items-center gap-2">
-                                     <div className="w-5 h-5">
-                                        <XIcon />
-                                     </div>
-                                     <h3 className="font-bold text-lg">해설 생성 오류</h3>
-                                 </div>
-                                 <p className="mt-2 text-sm opacity-90">{markdownToRender}</p>
-                             </div>
-                        ) : (
-                           cardContent
-                        )}
-                    </div>
-                )}
-            </div>
-            <ImageModal 
-                isOpen={isImageModalOpen} 
-                onClose={() => setIsImageModalOpen(false)}
-                imageUrl={problemImage}
-                altText={`Enlarged view of Problem ${problemNumber}`}
-            />
-        </>
     );
 };

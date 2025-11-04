@@ -7,7 +7,7 @@ import { XIcon } from './icons/XIcon';
 import { MathJaxRenderer } from './MathJaxRenderer';
 
 interface QnaPanelProps {
-    data: QnaData;
+    data: QnaData | null;
     onClose: () => void;
 }
 
@@ -17,9 +17,17 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const answerRef = useRef<HTMLDivElement>(null);
+    
+    // When the selected data changes, reset the Q&A state
+    useEffect(() => {
+        setQuestion('');
+        setAnswer(null);
+        setError(null);
+        setIsLoading(false);
+    }, [data]);
 
     const handleAskCaptain = async () => {
-        if (!question) return;
+        if (!question || !data) return;
 
         setIsLoading(true);
         setError(null);
@@ -40,21 +48,9 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
     };
 
     const typesetMath = (element: HTMLElement | null) => {
-        if (!element) return;
-        
-        const typeset = () => {
-             if (window.MathJax && typeof window.MathJax.typesetPromise === 'function') {
-                window.MathJax.typesetClear([element]);
-                window.MathJax.typesetPromise([element]).catch((err) =>
-                    console.error('MathJax typeset error:', err)
-                );
-            }
-        };
-
-        if (window.MathJax?.startup?.promise) {
-            window.MathJax.startup.promise.then(typeset);
-        } else {
-            typeset();
+        if (element && window.MathJax?.typesetPromise) {
+            window.MathJax.typesetClear([element]);
+            window.MathJax.typesetPromise([element]).catch(err => console.error('MathJax typeset error:', err));
         }
     }
 
@@ -64,9 +60,17 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
         }
     }, [answer]);
 
+    if (!data) {
+        return (
+            <div className="bg-surface rounded-lg shadow-md border border-primary p-4 flex flex-col items-center justify-center text-center h-48">
+                <h3 className="text-lg font-bold text-accent">선장에게 질문하기</h3>
+                <p className="mt-2 text-sm text-text-secondary">해설에서 드래그해서 질문하세요!</p>
+            </div>
+        );
+    }
 
     return (
-        <div className="bg-surface rounded-lg shadow-md border border-primary p-4 flex flex-col h-full">
+        <div className="bg-surface rounded-lg shadow-md border border-primary p-4 flex flex-col max-h-[80vh]">
             <div className="flex justify-between items-center mb-3 flex-shrink-0">
                 <h3 className="text-lg font-bold text-accent">선장에게 질문하기</h3>
                 <button onClick={onClose} className="p-1 rounded-full hover:bg-primary">

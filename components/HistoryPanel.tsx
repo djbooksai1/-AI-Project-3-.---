@@ -1,7 +1,10 @@
-import React from 'react';
-import { ExplanationSet, UserTier } from '../types';
+import React, { useState, useEffect } from 'react';
+import { ExplanationSet, UserTier, UsageData, ExplanationMode, ManualFile } from '../types';
 import { TrashIcon } from './icons/TrashIcon';
 import { XIcon } from './icons/XIcon';
+import { User } from 'firebase/auth';
+import { listUserFiles } from '../services/storageService';
+import { DownloadIcon } from './icons/DownloadIcon';
 
 interface HistoryPanelProps {
     isOpen: boolean;
@@ -9,18 +12,49 @@ interface HistoryPanelProps {
     sets: ExplanationSet[];
     onLoadSet: (setId: string) => void;
     onDeleteSet: (setId: string) => void;
+    user: User | null;
     userTier: UserTier;
+    usageData: UsageData;
+    tierLimits: UsageData;
+    isAdmin: boolean;
+    onUiAssetUpload: (assetName: 'dropzoneImage', file: File) => Promise<void>;
 }
 
-const tierDisplayMap: { [key in UserTier]: { name: string; message: string; } } = {
-    basic: { name: '베이직', message: "해설은 '<span class=\"font-bold text-accent\">베이직</span>' 플랜으로 적고 있습니다." },
-    standard: { name: '스탠다드', message: "해설은 '<span class=\"font-bold text-accent\">스탠다드</span>' 플랜으로 적고 있습니다." },
-    premium: { name: '프리미엄', message: "해설은 '<span class=\"font-bold text-accent\">프리미엄</span>' 플랜으로 적고 있습니다." },
-    pro: { name: '프로', message: "해설은 '<span class=\"font-bold text-accent\">프로</span>' 플랜으로 적고 있습니다." },
+const tierDisplayMap: { [key in UserTier]: { message: string; } } = {
+    basic: { message: `해설은 <span class="font-bold text-accent">'연필'</span>로 적고 있습니다.` },
+    standard: { message: `해설은 <span class="font-bold text-accent">'샤프'</span>로 적고 있습니다.` },
+    premium: { message: `해설은 <span class="font-bold text-accent">'펜'</span>으로 적고 있습니다.` },
+    pro: { message: `해설은 <span class="font-bold text-accent">'분필'</span>로 적고 있습니다.` },
 };
 
-export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, userTier }: HistoryPanelProps) {
-    const currentTierInfo = tierDisplayMap[userTier] || tierDisplayMap.basic;
+const modes: { id: ExplanationMode, label: string }[] = [
+    { id: 'fast', label: '빠른해설' },
+    { id: 'dajeong', label: '표준해설' },
+    { id: 'quality', label: '전문해설' },
+];
+
+export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, user, userTier, usageData, tierLimits, isAdmin, onUiAssetUpload }: HistoryPanelProps) {
+    const tierMessage = (tierDisplayMap[userTier] || tierDisplayMap.basic).message;
+    const [manualFiles, setManualFiles] = useState<ManualFile[]>([]);
+    const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+    const [isUploading, setIsUploading] = useState(false);
+
+    useEffect(() => {
+        if (isOpen && user) {
+            const fetchFiles = async () => {
+                setIsLoadingFiles(true);
+                try {
+                    const files = await listUserFiles(user.uid);
+                    setManualFiles(files);
+                } catch (error) {
+                    console.error("Error fetching manual files:", error);
+                } finally {
+                    setIsLoadingFiles(false);
+                }
+            };
+            fetchFiles();
+        }
+    }, [isOpen, user]);
 
     const formatDate = (timestamp: any) => {
         if (!timestamp?.toDate) return '날짜 정보 없음';
@@ -31,6 +65,22 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
             hour: '2-digit',
             minute: '2-digit',
         });
+    };
+    
+    const handleDropzoneImageUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (file) {
+            setIsUploading(true);
+            try {
+                await onUiAssetUpload('dropzoneImage', file);
+            } catch (error) {
+                // The error is already displayed by the App component,
+                // so we just need to log it for debugging and ensure the finally block runs.
+                console.error("UI asset upload failed:", error);
+            } finally {
+                setIsUploading(false);
+            }
+        }
     };
 
     return (
@@ -53,23 +103,97 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
                     <div className="p-6 border-b border-primary text-center">
                         <p
                             className="text-lg text-text-primary"
-                            dangerouslySetInnerHTML={{ __html: currentTierInfo.message }}
+                            dangerouslySetInnerHTML={{ __html: tierMessage }}
                         />
-                        <button
-                            onClick={() => { /* 나중에 상세페이지 팝업을 여기에 연결합니다. */ }}
-                            className="mt-4 px-6 py-2 bg-accent text-white font-semibold rounded-md hover:bg-accent-hover transition-colors"
+                        <a
+                            href="https://www.latpeed.com/memberships/6905a5b797ed45f240419b6b"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-4 inline-block px-6 py-2 bg-accent text-white font-semibold rounded-md hover:bg-accent-hover transition-colors"
                         >
                             플랜 업그레이드하기
-                        </button>
+                        </a>
                     </div>
                     
-                    <div className="flex-grow overflow-y-auto p-4">
+                     <div className="p-6 border-b border-primary">
+                        <h3 className="text-lg font-semibold text-text-primary mb-4">오늘 사용량</h3>
+                        <div className="space-y-3 text-sm">
+                            {modes.map(mode => {
+                                const used = usageData[mode.id] || 0;
+                                const limit = tierLimits[mode.id];
+                                const percentage = limit === Infinity || limit === 0 ? 0 : Math.min(100, (used / limit) * 100);
+
+                                return (
+                                    <div key={mode.id}>
+                                        <div className="flex justify-between mb-1">
+                                            <span className="font-semibold text-text-primary">{mode.label}</span>
+                                            <span className="text-text-secondary">{used} / {limit === Infinity ? '∞' : limit} 문제</span>
+                                        </div>
+                                        <div className="w-full bg-primary rounded-full h-2.5">
+                                            <div 
+                                                className="bg-accent h-2.5 rounded-full transition-all duration-500" 
+                                                style={{ width: `${percentage}%` }}
+                                            ></div>
+                                        </div>
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </div>
+
+                    <div className="flex-grow overflow-y-auto p-4 flex flex-col">
+                        {isAdmin && (
+                             <>
+                                <div className="mb-4">
+                                    <h3 className="text-lg font-semibold text-text-primary mb-3">관리자 설정</h3>
+                                    <div className="bg-background p-3 rounded-lg border border-primary">
+                                        <label htmlFor="dropzone-image-upload" className="text-sm font-semibold text-text-primary">
+                                            드롭존 이미지 변경
+                                        </label>
+                                        <p className="text-xs text-text-secondary mb-2">홈 화면의 파일 업로드 영역 상단에 표시될 이미지를 설정합니다.</p>
+                                        <input
+                                            id="dropzone-image-upload"
+                                            type="file"
+                                            accept="image/*"
+                                            onChange={handleDropzoneImageUpload}
+                                            disabled={isUploading}
+                                            className="text-xs text-text-secondary file:mr-2 file:py-1 file:px-2 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-accent file:text-white hover:file:bg-accent-hover"
+                                        />
+                                        {isUploading && <p className="text-xs text-accent mt-1 animate-pulse">업로드 중...</p>}
+                                    </div>
+                                </div>
+                                <div className="border-t border-primary my-4"></div>
+                            </>
+                        )}
+
+                        <div className="mb-4">
+                            <h3 className="text-lg font-semibold text-text-primary mb-3">제작 완료된 한글 파일</h3>
+                            {isLoadingFiles ? (
+                                <p className="text-center text-text-secondary py-4">파일 목록을 불러오는 중...</p>
+                            ) : manualFiles.length > 0 ? (
+                                <div className="space-y-2">
+                                    {manualFiles.map(file => (
+                                        <div key={file.name} className="bg-background p-3 rounded-lg border border-primary flex justify-between items-center">
+                                            <span className="text-sm text-text-primary truncate pr-2">{file.name}</span>
+                                            <a href={file.url} download={file.name} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-accent text-white rounded-md hover:bg-accent-hover transition-colors">
+                                                <DownloadIcon />
+                                                받기
+                                            </a>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                 <p className="text-center text-text-secondary py-4 text-sm">요청/제작 완료된 파일이 없습니다.</p>
+                            )}
+                        </div>
+                        
+                        <div className="border-t border-primary my-4"></div>
+
                          <h3 className="text-lg font-semibold text-text-primary mb-3">지난해설보기</h3>
                         <div className="space-y-3">
                             {sets.length === 0 ? (
                                 <div className="text-center text-text-secondary py-12">
                                     <p>저장된 해설이 없습니다.</p>
-                                    <p className="text-sm mt-2">새로운 문제를 업로드하여 해설을 만들면 자동으로 이곳에 저장됩니다.</p>
                                 </div>
                             ) : (
                                 sets.map(set => (

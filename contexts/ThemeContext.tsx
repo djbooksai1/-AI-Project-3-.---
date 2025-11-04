@@ -1,8 +1,6 @@
-
 import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { themes as availableThemes, Theme } from '../config/themes';
 import { textFonts as availableTextFonts, Font } from '../config/fonts';
-import { layouts as availableLayouts, Layout } from '../config/layouts';
 import { db, auth } from '../firebaseConfig';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged, User } from 'firebase/auth';
@@ -12,9 +10,6 @@ interface ThemeContextType {
     theme: Theme;
     setTheme: (theme: Theme) => void;
     themes: Theme[];
-    layout: Layout;
-    setLayout: (layout: Layout) => void;
-    layouts: Layout[];
     explanationFontSize: number;
     setExplanationFontSize: (size: number) => void;
     explanationMathSize: number;
@@ -31,7 +26,6 @@ export const ThemeContext = createContext<ThemeContextType | undefined>(undefine
 
 export function ThemeProvider({ children }: React.PropsWithChildren) {
     const [theme, setThemeState] = useState<Theme>(availableThemes[5]); // Default to "Paper"
-    const [layout, setLayoutState] = useState<Layout>(availableLayouts[0]);
     
     // State for explanation-specific typography and styling
     const [explanationFontSize, setExplanationFontSizeState] = useState<number>(14.5);
@@ -60,10 +54,6 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
                                     const foundTheme = availableThemes.find(t => t.name === settings.themeName);
                                     if (foundTheme) setThemeState(foundTheme);
                                 }
-                                if (settings.layoutName) {
-                                    const foundLayout = availableLayouts.find(l => l.name === settings.layoutName);
-                                    if (foundLayout) setLayoutState(foundLayout);
-                                }
                                 if (typeof settings.explanationFontSize === 'number') setExplanationFontSizeState(settings.explanationFontSize);
                                 if (typeof settings.explanationMathSize === 'number') setExplanationMathSizeState(settings.explanationMathSize);
                                 if (typeof settings.explanationPadding === 'number') setExplanationPaddingState(settings.explanationPadding);
@@ -83,7 +73,6 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             } else {
                 // User is signed out, reset to defaults
                 setThemeState(availableThemes[5]); // Paper
-                setLayoutState(availableLayouts[0]);
                 setExplanationFontSizeState(14.5);
                 setExplanationMathSizeState(105);
                 setExplanationPaddingState(24);
@@ -104,7 +93,6 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
         const settingsToSave = {
             themeSettings: {
                 themeName: theme.name,
-                layoutName: layout.name,
                 explanationFontSize,
                 explanationMathSize,
                 explanationPadding,
@@ -122,12 +110,12 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             if (error instanceof Error) {
                 errorMessage += "\n\n" + error.message;
             } else {
-                // FIX: Explicitly convert the unknown error to a string before concatenation.
-                errorMessage += "\n\n" + String(error);
+                // The 'error' variable in a catch block is of type 'unknown' and cannot be directly concatenated with a string. It must be explicitly converted to a string.
+                errorMessage += `\n\n${String(error)}`;
             }
             alert(errorMessage);
         }
-    }, [theme, layout, explanationFontSize, explanationMathSize, explanationPadding, explanationTextFont, currentUser]);
+    }, [theme, explanationFontSize, explanationMathSize, explanationPadding, explanationTextFont, currentUser]);
 
 
     // This effect applies theme colors to the DOM
@@ -148,9 +136,6 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
         theme,
         setTheme: setThemeState,
         themes: availableThemes,
-        layout,
-        setLayout: setLayoutState,
-        layouts: availableLayouts,
         explanationFontSize,
         setExplanationFontSize: setExplanationFontSizeState,
         explanationMathSize,
@@ -162,8 +147,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
         textFonts: availableTextFonts,
         saveThemeSettingsToFirestore, // Expose the save function
     }), [
-        theme, layout, explanationFontSize, explanationMathSize, explanationPadding, 
-        explanationTextFont, saveThemeSettingsToFirestore
+        theme, explanationFontSize, explanationMathSize, explanationPadding, explanationTextFont, saveThemeSettingsToFirestore
     ]);
 
     return (
@@ -171,4 +155,4 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             {children}
         </ThemeContext.Provider>
     );
-};
+}

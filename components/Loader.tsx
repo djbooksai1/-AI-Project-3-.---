@@ -4,6 +4,7 @@ import React from 'react';
 interface LoaderProps {
     status: string;
     remainingTime?: number | null;
+    onCancel?: () => void;
 }
 
 function formatTime(totalSeconds: number): string {
@@ -16,7 +17,7 @@ function formatTime(totalSeconds: number): string {
     return `약 ${seconds}초`;
 }
 
-export function Loader({ status, remainingTime }: LoaderProps) {
+export function Loader({ status, remainingTime, onCancel }: LoaderProps) {
     return (
         <div className="flex flex-col items-center justify-center p-12 text-center">
             <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-accent"></div>
@@ -27,6 +28,14 @@ export function Loader({ status, remainingTime }: LoaderProps) {
                 </p>
             ) : (
                 <p className="mt-2 text-sm text-text-secondary">잠시만 기다려주세요...</p>
+            )}
+            {onCancel && (
+                <button
+                    onClick={onCancel}
+                    className="mt-8 px-6 py-2 text-sm font-semibold bg-danger text-white rounded-md hover:bg-danger/80 transition-colors shadow-lg"
+                >
+                    해설 생성 취소
+                </button>
             )}
         </div>
     );

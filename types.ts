@@ -1,26 +1,9 @@
 
 
-
-
-
-export interface ExtractedProblem {
-    id?: string; // Optional unique ID for UI management
-    type: '객관식' | '주관식';
-    lines: string[];
-    choices?: string;
-    bbox: {
-        x_min: number;
-        y_min: number;
-        x_max: number;
-        y_max: number;
-    };
-}
-
 export interface Explanation {
     id: number;
     docId?: string; // Firestore document ID, will be set after first save
     markdown: string;
-    isSatisfied: boolean;
     isLoading?: boolean;
     isError?: boolean;
     pageNumber: number;
@@ -39,20 +22,12 @@ export interface UsageData {
 
 export type UserTier = 'basic' | 'standard' | 'premium' | 'pro';
 
-export interface UserSelection {
-    id: string;
-    pageNumber: number;
-    bbox: ExtractedProblem['bbox'];
-    initialText?: string; // Optional text from the initial coarse scan (for mobile)
-}
-
 export interface QnaData {
     cardId: number;
     problemText: string;
     fullExplanation: string;
     selectedLine: string; // This is the plain text content for the AI
     selectedLineHtml: string; // This is the innerHTML to preserve LaTeX
-    sourceHeight: number; // The height of the source explanation card body
 }
 
 export interface ExplanationSet {
@@ -61,4 +36,49 @@ export interface ExplanationSet {
     title: string;
     createdAt: any; // Firestore Timestamp
     explanationCount: number;
+}
+
+// [+] 수동 업로드 파일 인터페이스
+export interface ManualFile {
+    name: string;
+    url: string;
+}
+
+// [+] HWP 요청 관리용 인터페이스
+export interface HwpExplanationData {
+    problemImage: string; // Firebase Storage URL
+    markdown: string;
+    problemNumber: number;
+}
+
+export interface HwpRequest {
+    id: string; // Firestore document ID
+    userId: string;
+    userEmail: string; // For display
+    createdAt: any; // Firestore Timestamp
+    status: 'pending' | 'completed';
+    explanations: HwpExplanationData[];
+}
+
+
+// FIX: Define and export the Bbox interface for reuse.
+export interface Bbox {
+    x_min: number;
+    y_min: number;
+    x_max: number;
+    y_max: number;
+}
+
+// FIX: Define and export the ExtractedProblem interface to resolve import errors.
+export interface ExtractedProblem {
+    bbox: Bbox;
+    type: string;
+    lines: string[];
+}
+
+// FIX: Define and export the UserSelection interface to resolve import errors.
+export interface UserSelection {
+    id: string;
+    pageNumber: number;
+    bbox: Bbox;
 }

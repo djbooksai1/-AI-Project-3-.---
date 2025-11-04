@@ -7,7 +7,7 @@ interface ThemeEditorProps {
     onClose: () => void;
 }
 
-type EditorTab = 'layout' | 'colors' | 'typography';
+type EditorTab = 'colors' | 'typography';
 
 // FIX: Changed props to use React.PropsWithChildren for better type safety with children.
 type TabButtonProps = React.PropsWithChildren<{
@@ -30,14 +30,13 @@ function TabButton({ tab, activeTab, setActiveTab, children }: TabButtonProps) {
 export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
     const {
         theme, setTheme, themes,
-        layout, setLayout, layouts,
         explanationFontSize, setExplanationFontSize,
         explanationMathSize, setExplanationMathSize,
         explanationTextFont, setExplanationTextFont, textFonts,
         explanationPadding, setExplanationPadding,
         saveThemeSettingsToFirestore, // Get the save function from context
     } = useTheme();
-    const [activeTab, setActiveTab] = useState<EditorTab>('layout');
+    const [activeTab, setActiveTab] = useState<EditorTab>('colors');
 
     const handleClose = useCallback(async () => {
         await saveThemeSettingsToFirestore(); // Save settings before closing
@@ -48,20 +47,6 @@ export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
 
     const renderTabContent = () => {
         switch (activeTab) {
-            case 'layout':
-                return (
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                        {layouts.map(l => (
-                            <button
-                                key={l.name}
-                                onClick={() => setLayout(l)}
-                                className={`p-4 border-2 rounded-lg text-center transition-colors ${layout.name === l.name ? 'border-accent bg-accent/10' : 'border-primary bg-background hover:border-accent/50'}`}
-                            >
-                                {l.name}
-                            </button>
-                        ))}
-                    </div>
-                );
             case 'colors':
                 return (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -161,7 +146,6 @@ export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
                 </div>
                 <div className="border-b border-primary px-4">
                     <nav className="flex items-center gap-4">
-                        <TabButton tab="layout" activeTab={activeTab} setActiveTab={setActiveTab}>레이아웃</TabButton>
                         <TabButton tab="colors" activeTab={activeTab} setActiveTab={setActiveTab}>색상 배합</TabButton>
                         <TabButton tab="typography" activeTab={activeTab} setActiveTab={setActiveTab}>글꼴/크기</TabButton>
                     </nav>

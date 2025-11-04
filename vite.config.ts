@@ -1,18 +1,29 @@
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+// FIX: Import 'cwd' from 'node:process' to avoid reliance on global types which were not being found.
+import { cwd } from 'node:process';
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    port: 5173,
-    host: true, // 👈 server 블록에도 추가
-    allowedHosts: ['*'] // 👈 server 블록에도 추가
-  },
-  // 'preview' 설정은 'vite preview' 명령어로 프로덕션 빌드를 실행할 때 적용됩니다.
-  preview: {
-    port: 8080,
-    host: true, // 👈 이 줄을 추가하세요. (컨테이너 외부 접속 허용)
-    allowedHosts: ['*']
-  }
+export default defineConfig(({ mode }) => {
+  // Load env file based on `mode` in the current working directory.
+  // Set the third parameter to '' to load all env regardless of the `VITE_` prefix.
+  // FIX: Use the imported `cwd` function instead of `process.cwd()` to resolve the typing error.
+  const env = loadEnv(mode, cwd(), '');
+  return {
+    // vite config
+    define: {
+      'process.env': env
+    },
+    plugins: [react()],
+    server: {
+      port: 5173,
+      // DEV: Allow connections from the AI Studio proxy by listening on all network interfaces.
+      host: true,
+    },
+    // 'preview' 설정은 'vite preview' 명령어로 프로덕션 빌드를 실행할 때 적용됩니다.
+    preview: {
+      port: 8080,
+      host: true,
+    }
+  }
 })

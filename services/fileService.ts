@@ -1,9 +1,49 @@
-export const fileToBase64 = (file: File | Blob): Promise<string> => {
+export const fileToBase64 = (
+    file: File | Blob, 
+    options?: { convertToJpeg?: boolean; maxWidth?: number; quality?: number }
+): Promise<string> => {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
+        reader.onload = (event) => {
+            const result = event.target?.result;
+            if (typeof result !== 'string') {
+                return reject(new Error('FileReader did not return a string.'));
+            }
+            
+            if (!options?.convertToJpeg) {
+                return resolve(result);
+            }
+
+            const img = new Image();
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                
+                const maxWidth = options.maxWidth || 800; // Default max width if not provided
+                let width = img.naturalWidth;
+                let height = img.naturalHeight;
+
+                if (width > maxWidth) {
+                    height = (height * maxWidth) / width;
+                    width = maxWidth;
+                }
+
+                canvas.width = width;
+                canvas.height = height;
+
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    return reject(new Error('Could not create canvas context.'));
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                const quality = options.quality || 0.9;
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve(dataUrl);
+            };
+            img.onerror = (err) => reject(new Error(`Image load error: ${err}`));
+            img.src = result;
+        };
+        reader.onerror = (error) => reject(error);
         reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = error => reject(error);
     });
 };
 

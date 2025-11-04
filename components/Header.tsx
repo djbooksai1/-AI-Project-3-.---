@@ -1,62 +1,57 @@
-
-
 import React from 'react';
 import { PaletteIcon } from './icons/PaletteIcon';
-import { ExplanationMode, UsageData } from '../types';
+import { ExplanationMode, UsageData, UserTier } from '../types';
 import { User } from 'firebase/auth';
 import { HistoryIcon } from './icons/HistoryIcon';
+import { BookIcon } from './icons/BookIcon';
+import { ClipboardListIcon } from './icons/ClipboardListIcon';
 
 type SavingStatus = 'idle' | 'saving' | 'saved' | 'error';
 interface HeaderProps {
     onGoHome: () => void;
-    onOpenGuidelines: () => void;
     onOpenThemeEditor: () => void;
     onOpenHistory: () => void;
-    explanationMode: ExplanationMode;
+    explanationMode: ExplanationMode | null;
     onSetExplanationMode: (mode: ExplanationMode) => void;
     user: User | null;
     onLogout: () => void;
-    savingStatus: SavingStatus;
     usageData: UsageData;
     tierLimits: UsageData;
     isProcessing: boolean;
+    promptForMode: boolean;
+    isAdmin: boolean;
+    onOpenGuidelines: () => void;
+    onOpenHwpRequests: () => void;
 }
 
 export function Header({ 
     onGoHome, 
-    onOpenGuidelines, 
     onOpenThemeEditor, 
     onOpenHistory,
     explanationMode, 
     onSetExplanationMode, 
     user, 
     onLogout,
-    savingStatus,
     usageData,
     tierLimits,
-    isProcessing
+    isProcessing,
+    promptForMode,
+    isAdmin,
+    onOpenGuidelines,
+    onOpenHwpRequests
 }: HeaderProps) {
-    // 여기에서 UI에 표시될 해설 모드의 이름을 자유롭게 변경할 수 있습니다.
-    // 'id'는 데이터베이스와 코드 로직에서 사용되는 고유 값이므로 변경해서는 안 됩니다.
     const modes: { id: ExplanationMode, label: string, title: string }[] = [
-        { id: 'fast', label: '빠른해설', title: 'gemini-2.5-flash 모델을 사용하여 신속하게 해설을 생성합니다.' },
-        { id: 'dajeong', label: '표준해설', title: 'gemini-2.5-pro 모델을 사용하여 속도와 품질의 균형을 맞춘 표준 해설을 생성합니다.' },
-        { id: 'quality', label: '전문해설', title: 'gemini-2.5-pro 모델의 Deep Thinking 기능을 활성화하여 매우 복잡한 문제에 대한 심층적인 해설을 생성합니다 (느림).' },
+        { id: 'fast', label: '빠른해설', title: '빠른 해설을 위한 해석의 ai 를 활용합니다.' },
+        { id: 'dajeong', label: '표준해설', title: '속도와 품질을 챙기기 위한 균형잡힌 해적의 ai를 활용합니다.' },
+        { id: 'quality', label: '전문해설', title: '복잡한 문제와 엄격한 강령준수를 위한 해적의 고급형 ai 를 활용합니다.' },
     ];
-
-    const getStatusIndicator = () => {
-        switch (savingStatus) {
-            case 'saving':
-                return <span className="text-sm text-accent animate-pulse">자동 저장 중...</span>;
-            case 'saved':
-                return <span className="text-sm text-success">저장 완료</span>;
-            case 'error':
-                return <span className="text-sm text-danger">저장 실패</span>;
-            default:
-                return null;
-        }
-    };
     
+    const activeColorClass: Record<ExplanationMode, string> = {
+        fast: 'bg-blue-600 text-white', // 푸른색
+        dajeong: 'bg-red-600 text-white', // 붉은색
+        quality: 'bg-gold text-black' // 황금색
+    };
+
     const getRemaining = (mode: ExplanationMode) => {
         const limit = tierLimits[mode];
         const used = usageData[mode] || 0;
@@ -68,61 +63,64 @@ export function Header({
 
     return (
         <header className="bg-background/80 backdrop-blur-sm sticky top-0 z-10 border-b border-primary">
-            <div className="container mx-auto px-4 md:px-8 py-4 flex justify-between items-center">
+            <div className="w-full lg:w-1/2 mx-auto px-4 md:px-8 py-4 flex justify-between items-center">
                 <div className="flex items-center gap-6">
-                    <button onClick={onGoHome} className="inline-grid text-left">
-                        <h1 className="text-4xl md:text-5xl font-black text-accent tracking-[0.2em] whitespace-nowrap select-none">
-                            해적
-                        </h1>
-                        <h2 className="text-xs md:text-sm text-text-secondary mt-1 select-none text-center tracking-wider">
-                            해.적 : 해설을, 적다.
-                        </h2>
-                    </button>
-                    {user && (
-                         <button
-                            onClick={onOpenGuidelines}
-                            className="px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md hover:bg-primary transition-colors border border-primary hidden lg:block"
-                        >
-                            해설강령 ver2.0
+                    <div className="flex items-center gap-3">
+                        <button onClick={onGoHome} className="inline-grid text-left">
+                            <h1 className="text-4xl md:text-5xl font-black text-accent tracking-[0.2em] whitespace-nowrap select-none">
+                                해적
+                            </h1>
+                            <h2 className="text-xs md:text-sm text-text-secondary mt-1 select-none text-center tracking-wider">
+                                해설을, 적다.
+                            </h2>
                         </button>
-                    )}
+                    </div>
                 </div>
 
                 {user && (
                     <div className="flex items-center gap-4">
-                        <div className="flex items-center bg-surface p-1 rounded-lg border border-primary">
-                            {modes.map(mode => {
-                                const remaining = getRemaining(mode.id);
-                                const isExhausted = remaining === 0;
-                                return (
-                                    <button
-                                        key={mode.id}
-                                        onClick={() => onSetExplanationMode(mode.id)}
-                                        disabled={isProcessing}
-                                        className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors whitespace-nowrap relative ${
-                                            explanationMode === mode.id
-                                                ? 'bg-accent text-white shadow-sm'
-                                                : 'bg-transparent text-text-secondary hover:bg-primary/50'
-                                        } disabled:opacity-50 disabled:cursor-not-allowed`}
-                                        title={`${mode.title}\n오늘 남은 횟수: ${remaining}`}
-                                    >
-                                        {mode.label}
-                                        <span className={`absolute -top-1.5 -right-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full ${
-                                            isExhausted
-                                                ? 'bg-danger text-white'
-                                                : explanationMode === mode.id
-                                                ? 'bg-white text-accent'
-                                                : 'bg-primary text-text-secondary'
-                                        }`}>
-                                            {remaining}
-                                        </span>
-                                    </button>
-                                )
-                            })}
+                        <div className="relative">
+                            <div className={`flex items-center bg-surface p-1 rounded-lg border border-primary transition-all duration-300 ${promptForMode ? 'animate-pulse-red-border' : ''}`}>
+                                {modes.map(mode => {
+                                    const remaining = getRemaining(mode.id);
+                                    const isExhausted = remaining === 0;
+                                    const isActive = explanationMode === mode.id;
+
+                                    return (
+                                        <button
+                                            key={mode.id}
+                                            onClick={() => onSetExplanationMode(mode.id)}
+                                            disabled={isProcessing}
+                                            className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors whitespace-nowrap relative ${
+                                                isActive
+                                                    ? activeColorClass[mode.id]
+                                                    : 'bg-transparent text-text-secondary hover:bg-primary/50'
+                                            } disabled:opacity-50 disabled:cursor-not-allowed`}
+                                            title={`${mode.title}\n오늘 남은 횟수: ${remaining}`}
+                                        >
+                                            {mode.label}
+                                            <span className={`absolute -top-1.5 -right-1.5 text-xs font-bold px-1.5 py-0.5 rounded-full ${
+                                                isExhausted
+                                                    ? 'bg-danger text-white'
+                                                    : isActive
+                                                    ? `bg-white ${mode.id === 'quality' ? 'text-black' : 'text-accent'}`
+                                                    : 'bg-primary text-text-secondary'
+                                            }`}>
+                                                {remaining}
+                                            </span>
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                             {promptForMode && (
+                                <div className="absolute top-full mt-2 left-1/2 -translate-x-1/2 bg-danger text-white text-xs font-bold px-3 py-1.5 rounded-md shadow-lg whitespace-nowrap z-20">
+                                    해설 AI를 골라주세요!
+                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-b-4 border-b-danger"></div>
+                                </div>
+                            )}
                         </div>
                         
                         <div className="flex items-center gap-2 md:gap-3">
-                            <div className="w-24 text-center hidden sm:block">{getStatusIndicator()}</div>
                             <span className="text-sm text-text-secondary hidden xl:inline">{user.email}</span>
                             
                             <button
@@ -133,6 +131,27 @@ export function Header({
                                 <HistoryIcon />
                                 <span className="hidden md:inline">마이페이지</span>
                             </button>
+                            
+                            {isAdmin && (
+                                <>
+                                <button
+                                    onClick={onOpenHwpRequests}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md hover:bg-primary transition-colors border border-primary"
+                                    title="HWP 요청 목록"
+                                >
+                                    <ClipboardListIcon />
+                                    <span className="hidden md:inline">HWP 요청</span>
+                                </button>
+                                <button
+                                    onClick={onOpenGuidelines}
+                                    className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md hover:bg-primary transition-colors border border-primary"
+                                    title="해설강령 관리"
+                                >
+                                    <BookIcon />
+                                    <span className="hidden md:inline">강령 관리</span>
+                                </button>
+                                </>
+                            )}
                             
                             <button
                                 onClick={onOpenThemeEditor}
