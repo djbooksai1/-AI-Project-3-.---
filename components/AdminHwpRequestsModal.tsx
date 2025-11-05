@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { HwpRequest } from '../types';
@@ -15,6 +15,19 @@ interface AdminHwpRequestsModalProps {
 
 const RequestItem: React.FC<{ request: HwpRequest }> = ({ request }) => {
     const [isExpanded, setIsExpanded] = useState(false);
+    const contentRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        if (isExpanded && contentRef.current && window.Prism) {
+            // Use a short timeout to ensure ReactMarkdown has rendered the content to the DOM.
+            const timer = setTimeout(() => {
+                if (contentRef.current) {
+                    window.Prism.highlightAllUnder(contentRef.current);
+                }
+            }, 0);
+            return () => clearTimeout(timer);
+        }
+    }, [isExpanded]);
 
     const handleToggleStatus = async () => {
         const newStatus = request.status === 'pending' ? 'completed' : 'pending';
@@ -61,7 +74,7 @@ const RequestItem: React.FC<{ request: HwpRequest }> = ({ request }) => {
                 </div>
             </div>
             {isExpanded && (
-                <div className="p-3 border-t border-primary/50">
+                <div className="p-3 border-t border-primary/50" ref={contentRef}>
                     <div className="space-y-4">
                         {request.explanations.map((exp, index) => (
                             <div key={index} className="border-b border-primary/30 pb-3 last:border-b-0">

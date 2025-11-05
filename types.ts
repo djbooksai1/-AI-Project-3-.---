@@ -1,5 +1,4 @@
 
-
 export interface Explanation {
     id: number;
     docId?: string; // Firestore document ID, will be set after first save
@@ -10,7 +9,19 @@ export interface Explanation {
     problemNumber: number;
     problemImage: string; // base64 string before upload, Firebase Storage URL after
     originalProblemText: string;
+
+    // "Dynamic AI Tutor" features
+    coreConcepts?: string[];
+    difficulty?: number; // 1-5
+    variationProblem?: {
+        problem: string;
+        explanation: string;
+    } | null; // null indicates it's being generated, undefined means not started
+
+    // "Haejeok Cache" feature
+    isGolden?: boolean;
 }
+
 
 export type ExplanationMode = 'fast' | 'dajeong' | 'quality';
 
@@ -60,6 +71,20 @@ export interface HwpRequest {
     explanations: HwpExplanationData[];
 }
 
+// FIX: Define and export the ExtractedProblem interface for reuse.
+export interface ExtractedProblem {
+    type: string;
+    lines: any[]; // Could be more specific if line structure is known
+    bbox: Bbox;
+}
+
+// FIX: Define and export the UserSelection interface for reuse.
+export interface UserSelection {
+    id: string;
+    pageNumber: number;
+    bbox: Bbox;
+}
+
 
 // FIX: Define and export the Bbox interface for reuse.
 export interface Bbox {
@@ -67,18 +92,4 @@ export interface Bbox {
     y_min: number;
     x_max: number;
     y_max: number;
-}
-
-// FIX: Define and export the ExtractedProblem interface to resolve import errors.
-export interface ExtractedProblem {
-    bbox: Bbox;
-    type: string;
-    lines: string[];
-}
-
-// FIX: Define and export the UserSelection interface to resolve import errors.
-export interface UserSelection {
-    id: string;
-    pageNumber: number;
-    bbox: Bbox;
 }

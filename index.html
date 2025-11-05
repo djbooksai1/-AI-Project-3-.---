@@ -88,7 +88,12 @@
             },
             chtml: {
                 displayAlign: 'left',
-                displayIndent: '0em'
+                displayIndent: '0em',
+                // [+] 긴 수식이 페이지 레이아웃을 깨뜨리지 않도록 자동 줄바꿈 설정 추가
+                linebreaks: {
+                    automatic: true,
+                    width: 'container' // 컨테이너 너비에 맞춰 줄바꿈
+                }
             },
             startup: {
                 ready: () => {
@@ -99,6 +104,11 @@
     </script>
     <script type="text/javascript" id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"></script>
     
+    <!-- [+] Prism.js for Syntax Highlighting -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-okaidia.min.css" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js" defer></script>
+
     <!-- PDF Export Libraries -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>

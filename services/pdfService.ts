@@ -51,7 +51,7 @@ export const getPdfDocument = async (file: File): Promise<any> => {
  * @param scale The rendering scale. A higher value results in a higher resolution image.
  * @returns A promise that resolves to a data URL string of the rendered image.
  */
-export const renderPdfPageToImage = async (page: any, scale: number = 6.0): Promise<string> => {
+export const renderPdfPageToImage = async (page: any, scale: number = 3.0): Promise<string> => {
     const viewport = page.getViewport({ scale });
 
     // Create a temporary canvas to render the PDF page.

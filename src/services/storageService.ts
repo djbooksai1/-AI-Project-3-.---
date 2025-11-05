@@ -7,10 +7,9 @@ import type { ManualFile } from '../types';
  * This function is specifically for problem images associated with a user.
  * @param userId The UID of the current user.
  * @param base64String The image string, which must be a data URL.
- * @param isCache Whether the image is for the golden set cache.
  * @returns A promise that resolves to the public download URL of the uploaded image.
  */
-// Fix: Added optional isCache parameter to support saving images to a different location for the "golden set" cache.
+// FIX: Added optional isCache parameter to support saving images to a different location for the "golden set" cache.
 export const uploadProblemImage = async (userId: string, base64String: string, isCache?: boolean): Promise<string> => {
     // This function is intended for new uploads, so we expect a data URL.
     // If it's not, it might be an existing URL, so we return it to prevent errors.

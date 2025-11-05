@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 interface LoaderProps {
@@ -21,7 +20,7 @@ export function Loader({ status, remainingTime, onCancel }: LoaderProps) {
     return (
         <div className="flex flex-col items-center justify-center p-12 text-center">
             <div className="w-16 h-16 border-4 border-dashed rounded-full animate-spin border-accent"></div>
-            <p className="mt-6 text-lg font-semibold text-text-primary">{status}</p>
+            <p className="mt-6 text-lg font-semibold text-text-primary w-full break-words">{status}</p>
             {remainingTime && remainingTime > 0 ? (
                 <p className="mt-2 text-sm text-text-secondary">
                     예상 완료 시간: {formatTime(remainingTime)}

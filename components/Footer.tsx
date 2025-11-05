@@ -58,7 +58,7 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
             className="py-6 border-t border-primary"
             style={{ backgroundColor: footerBgColor, transition: 'background-color 0.3s ease' }}
         >
-            <div className="container mx-auto px-4 flex justify-between items-center">
+            <div className="w-full max-w-4xl mx-auto px-4 flex justify-between items-center">
                 {/* Text content on the left */}
                 <div className="text-left">
                     <div className="flex items-center gap-4 mb-2">

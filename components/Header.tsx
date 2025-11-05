@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { PaletteIcon } from './icons/PaletteIcon';
 import { ExplanationMode, UsageData, UserTier } from '../types';
@@ -63,9 +64,11 @@ export function Header({
 
     return (
         <header className="bg-background/80 backdrop-blur-sm sticky top-0 z-10 border-b border-primary">
-            <div className="w-full lg:w-1/2 mx-auto px-4 md:px-8 py-4 flex justify-between items-center">
-                <div className="flex items-center gap-6">
-                    <div className="flex items-center gap-3">
+            {/* Main container: stacks vertically on mobile, horizontally on large screens */}
+            <div className="w-full max-w-7xl mx-auto px-4 md:px-8 py-4 flex flex-col lg:flex-row lg:justify-between lg:items-center gap-4">
+                {/* Logo part */}
+                <div className="flex-shrink-0 self-start lg:self-center">
+                     <div className="flex items-center gap-3">
                         <button onClick={onGoHome} className="inline-grid text-left">
                             <h1 className="text-4xl md:text-5xl font-black text-accent tracking-[0.2em] whitespace-nowrap select-none">
                                 해적
@@ -77,8 +80,10 @@ export function Header({
                     </div>
                 </div>
 
+                {/* User controls part */}
                 {user && (
-                    <div className="flex items-center gap-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-center lg:justify-end gap-4 w-full lg:w-auto">
+                        {/* Mode Selector */}
                         <div className="relative">
                             <div className={`flex items-center bg-surface p-1 rounded-lg border border-primary transition-all duration-300 ${promptForMode ? 'animate-pulse-red-border' : ''}`}>
                                 {modes.map(mode => {
@@ -91,7 +96,7 @@ export function Header({
                                             key={mode.id}
                                             onClick={() => onSetExplanationMode(mode.id)}
                                             disabled={isProcessing}
-                                            className={`px-3 py-1.5 text-sm font-semibold rounded-md transition-colors whitespace-nowrap relative ${
+                                            className={`flex-1 sm:flex-auto px-3 py-1.5 text-sm font-semibold rounded-md transition-colors whitespace-nowrap relative ${
                                                 isActive
                                                     ? activeColorClass[mode.id]
                                                     : 'bg-transparent text-text-secondary hover:bg-primary/50'
@@ -120,7 +125,8 @@ export function Header({
                             )}
                         </div>
                         
-                        <div className="flex items-center gap-2 md:gap-3">
+                        {/* Action Buttons */}
+                        <div className="flex items-center flex-wrap justify-center sm:justify-end gap-2 md:gap-3">
                             <span className="text-sm text-text-secondary hidden xl:inline">{user.email}</span>
                             
                             <button

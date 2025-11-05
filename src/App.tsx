@@ -35,6 +35,12 @@ import { AdminHwpRequestsModal } from './components/AdminHwpRequestsModal';
 import { QuestionMarkCircleIcon } from './components/icons/QuestionMarkCircleIcon';
 import { fileToBase64 } from './services/fileService';
 
+declare global {
+  interface Window {
+    recaptchaVerifier?: RecaptchaVerifier;
+  }
+}
+
 const AuthComponent = ({ appError }: { appError: string | null }) => {
     const [error, setError] = useState('');
     const [phoneNumber, setPhoneNumber] = useState(localStorage.getItem('lastPhoneNumber') || '');
@@ -43,22 +49,22 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
     const [isCodeSent, setIsCodeSent] = useState(false);
     const [isSendingCode, setIsSendingCode] = useState(false);
     
-    const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
-    const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
-
     const displayError = appError || error;
 
     useEffect(() => {
-        if (recaptchaContainerRef.current && !recaptchaVerifierRef.current) {
-            const verifier = new RecaptchaVerifier(auth, recaptchaContainerRef.current, {
+        if (!window.recaptchaVerifier && document.getElementById('recaptcha-container')) {
+            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
                 'size': 'invisible',
                 'callback': () => {},
                 'expired-callback': () => {
                     setError('reCAPTCHA 인증이 만료되었습니다. 다시 시도해주세요.');
+                    if (window.recaptchaVerifier) {
+                        window.recaptchaVerifier.clear();
+                        delete window.recaptchaVerifier;
+                    }
                 }
             });
-            verifier.render();
-            recaptchaVerifierRef.current = verifier;
+            window.recaptchaVerifier.render();
         }
     }, []);
 
@@ -73,7 +79,7 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
         setIsSendingCode(true);
 
         try {
-            const appVerifier = recaptchaVerifierRef.current;
+            const appVerifier = window.recaptchaVerifier;
              if (!appVerifier) {
                 setError('reCAPTCHA를 초기화하지 못했습니다. 페이지를 새로고침하고 다시 시도해주세요.');
                 setIsSendingCode(false);
@@ -175,7 +181,7 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
                         )}
                     </div>
                     {displayError && <p className="text-sm text-center text-danger mt-4">{displayError}</p>}
-                    <div id="recaptcha-container" ref={recaptchaContainerRef} className="flex justify-center mt-4"></div>
+                    <div id="recaptcha-container" className="flex justify-center mt-4"></div>
                 </div>
             </div>
         </div>
@@ -191,20 +197,6 @@ const TIER_LIMITS: { [key in UserTier]: UsageData } = {
 
 const getTodayDateString = () => new Date().toISOString().slice(0, 10);
 const newId = () => Date.now() + Math.random();
-
-const isApiConfigError = (message: string): boolean => {
-    const lowerCaseMessage = message.toLowerCase();
-    const keywords = [
-        'permission', 
-        'api key',
-        'billing',
-        'api has not been used',
-        'enable the api',
-        'not enabled',
-        '핵심 ai 지침', // Custom error from getPrompt
-    ];
-    return keywords.some(keyword => lowerCaseMessage.includes(keyword));
-};
 
 export function App() {
     const [user, setUser] = useState<User | null>(null);
@@ -411,7 +403,7 @@ export function App() {
                 
                 if (analyzedProblemsOnPage.length > 0) {
                     const initialExplanations = await service.createInitialExplanations(analyzedProblemsOnPage, totalProblemsFound + analyzedProblemsOnPage.length, totalProblemsFound);
-                    setExplanations(prev => [...prev, ...initialExplanations].sort((a,b) => a.problemNumber - b.problemNumber));
+                    setExplanations(prev => [...prev, ...initialExplanations]);
                     allInitialExplanations.push(...initialExplanations);
                     totalProblemsFound += analyzedProblemsOnPage.length;
                 }
@@ -492,7 +484,7 @@ export function App() {
             }
 
             const finalImage = explanationToSave.problemImage.startsWith('data:image') ? await uploadProblemImage(user.uid, explanationToSave.problemImage) : explanationToSave.problemImage;
-
+            
             // Create a clean object for Firestore, converting undefined to null and removing UI state.
             const dataForFirestore = {
                 markdown: explanationToSave.markdown,

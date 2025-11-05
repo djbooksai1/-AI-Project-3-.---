@@ -34,6 +34,8 @@ export const getPrompt = async (promptName: string): Promise<string> => {
     } catch (error) {
         console.error(`CRITICAL: Error fetching prompt '${promptName}':`, error);
         // We throw a specific error that can be caught to notify the user.
-        throw new Error(`핵심 AI 지침('${promptName}')을 불러오는 데 실패했습니다. 앱을 사용할 수 없습니다.`);
+        // The error message now includes "해적 AI" to be routed correctly.
+        const firestoreError = error instanceof Error ? ` (Firestore 오류: ${error.message})` : '';
+        throw new Error(`해적 AI 지침('${promptName}')을 불러오는 데 실패했습니다.${firestoreError} 앱을 사용할 수 없습니다.`);
     }
 };

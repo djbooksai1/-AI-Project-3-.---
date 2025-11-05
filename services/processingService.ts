@@ -1,63 +1,65 @@
+
+
 import { getPdfDocument, renderPdfPageToImage } from './pdfService';
 import { 
-    generateExplanation, 
-    structureTextIntoProblems,
-    extractTextWithCloudVision,
-    filterMathProblemsBatch,
+    generateExplanationsBatch,
+    detectMathProblemsFromImage,
+    postProcessMarkdown,
+    formatMathEquations,
+    StructuredExplanation,
 } from './geminiService';
 import { fileToBase64, isPdfFile } from './fileService';
 import { Explanation, ExplanationMode, Bbox } from '../types';
-import { uploadProblemImage } from './storageService';
+import { db } from '../firebaseConfig';
+// FIX: Firestore functions should be imported from 'firebase/firestore', not a local config file.
+import { doc, getDoc, setDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 
 interface ProcessingCallbacks {
     setStatusMessage: (message: string) => void;
     onUpdateExplanation: (updatedExplanation: Explanation) => void;
 }
 
-type PageImage = { image: string; pageNumber: number };
-type AnalyzedProblem = { 
+export type AnalyzedProblem = { 
     pageNumber: number; 
     problemText: string; 
-    pageImage: string; // The original full page image
-    bbox: Bbox;        // The normalized bounding box of the problem on the page
+    pageImage: string; 
+    bbox: Bbox;
 };
 
-/**
- * Crops a base64 image using a normalized bounding box.
- * @param base64Image The source image data URL.
- * @param bbox The normalized bounding box (coordinates from 0 to 1).
- * @returns A promise that resolves to the base64 data URL of the cropped image.
- */
+type PageImage = { image: string; pageNumber: number };
+
 const cropImage = (base64Image: string, bbox: Bbox): Promise<string> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
         img.onload = () => {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            if (!ctx) {
-                return reject(new Error('Failed to get canvas context'));
-            }
+            if (!ctx) return reject(new Error('Failed to get canvas context'));
 
+            // 1. AI가 감지한 영역의 절대 픽셀 좌표 및 크기 계산
             const sx = bbox.x_min * img.naturalWidth;
             const sy = bbox.y_min * img.naturalHeight;
             const sWidth = (bbox.x_max - bbox.x_min) * img.naturalWidth;
+            // FIX: Corrected typo from 'a.bbox.y_min' to 'bbox.y_min'.
             const sHeight = (bbox.y_max - bbox.y_min) * img.naturalHeight;
+            
+            // 2. "좌표 보정" 로직: 문제 번호를 포함하기 위해 좌측과 상단으로 지능적 확장
+            // 문제 너비의 15%를 좌측 여백으로, 높이의 5%를 상단 여백으로 확보
+            const leftExpansion = sWidth * 0.15;
+            const topExpansion = sHeight * 0.05;
+            // 미관을 위한 최소한의 우측/하단 여백
+            const otherPadding = sWidth * 0.05; 
 
-            // Add some padding around the cropped image for better visual appearance
-            const padding = 20; // pixels
-            const paddedX = Math.max(0, sx - padding);
-            const paddedY = Math.max(0, sy - padding);
-            const paddedWidth = Math.min(img.naturalWidth - paddedX, sWidth + padding * 2);
-            const paddedHeight = Math.min(img.naturalHeight - paddedY, sHeight + padding * 2);
+            // 3. 보정된 새로운 좌표계 계산
+            const correctedX = Math.max(0, sx - leftExpansion);
+            const correctedY = Math.max(0, sy - topExpansion);
+            const correctedWidth = Math.min(img.naturalWidth - correctedX, sWidth + leftExpansion + otherPadding);
+            const correctedHeight = Math.min(img.naturalHeight - correctedY, sHeight + topExpansion + otherPadding);
 
-            canvas.width = paddedWidth;
-            canvas.height = paddedHeight;
-
-            ctx.drawImage(
-                img,
-                paddedX, paddedY, paddedWidth, paddedHeight, // Source rectangle (from original image)
-                0, 0, paddedWidth, paddedHeight             // Destination rectangle (on canvas)
-            );
+            // 4. 보정된 좌표계를 사용하여 캔버스에 이미지 그리기
+            canvas.width = correctedWidth;
+            canvas.height = correctedHeight;
+            ctx.drawImage(img, correctedX, correctedY, correctedWidth, correctedHeight, 0, 0, correctedWidth, correctedHeight);
             
             resolve(canvas.toDataURL('image/jpeg', 0.95));
         };
@@ -66,188 +68,92 @@ const cropImage = (base64Image: string, bbox: Bbox): Promise<string> => {
     });
 };
 
-// Helper function to extract problem number from text.
 const parseProblemNumberFromText = (text: string): number | null => {
-    // Regex for "1.", "[1]", "01.", etc. up to 3 digits.
     const problemStartRegex = /^(?:\[\s*(\d{1,3})\s*\]|(\d{1,3})\.)/;
     const match = text.trim().match(problemStartRegex);
-    if (match) {
-        const numStr = match[1] || match[2];
-        if (numStr) {
-            return parseInt(numStr, 10);
-        }
-    }
-    return null;
+    return match ? parseInt(match[1] || match[2], 10) : null;
+};
+
+// Very simple string hash. Not cryptographically secure, but good enough for cache key generation.
+const simpleHash = async (s: string): Promise<string> => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(s);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 class ProcessingService {
     
-    public getPdfDocument = getPdfDocument;
-
-    public async analyzeFiles(
-        files: File[],
-        setStatusMessage: (message: string) => void
-    ): Promise<AnalyzedProblem[]> {
-        const allPages: PageImage[] = [];
-
-        for (const file of files) {
-            let pageImages: PageImage[] = [];
-            
+    async getAllPageImages(files: File[], setStatusMessage: (message: string) => void): Promise<PageImage[]> {
+        const allPageImages: PageImage[] = [];
+        for (const [index, file] of files.entries()) {
+            setStatusMessage(`파일 ${index + 1}/${files.length} 변환 중: ${file.name}`);
             if (await isPdfFile(file)) {
-                let pdf: any; 
+                let pdf;
                 try {
-                    setStatusMessage(`'${file.name}' PDF 문서 여는 중...`);
-                    pdf = await this.getPdfDocument(file);
-                    setStatusMessage(`'${file.name}'의 ${pdf.numPages}개 페이지를 순차적으로 렌더링합니다...`);
-                    
+                    pdf = await getPdfDocument(file);
                     for (let i = 1; i <= pdf.numPages; i++) {
-                        const pageNumber = i;
-                        try {
-                            setStatusMessage(`'${file.name}'의 ${pageNumber}페이지 렌더링...`);
-                            const page = await pdf.getPage(pageNumber);
-                            const image = await renderPdfPageToImage(page, 2.0);
-                            pageImages.push({ image, pageNumber });
-                            page.cleanup();
-                        } catch (pageError) {
-                            console.error(`Error rendering page ${pageNumber} of "${file.name}". Skipping this page.`, pageError);
-                            setStatusMessage(`'${file.name}'의 ${pageNumber}페이지 처리 실패. 이 페이지를 건너뜁니다.`);
-                        }
+                        const page = await pdf.getPage(i);
+                        const image = await renderPdfPageToImage(page, 3.0);
+                        allPageImages.push({ image, pageNumber: i });
+                        page.cleanup();
                     }
-
+                    if (pdf && pdf.destroy) await pdf.destroy();
                 } catch (pdfError) {
-                    console.warn(`PDF processing failed for "${file.name}", falling back to treating it as a single image.`, pdfError);
-                    setStatusMessage(`'${file.name}' PDF 처리 실패. 이미지로 다시 시도합니다...`);
-                    try {
-                        const image = await fileToBase64(file);
-                        pageImages.push({ image, pageNumber: 1 });
-                    } catch (imageFallbackError) {
-                        console.error(`Failed to process "${file.name}" even as an image. Skipping file.`, imageFallbackError);
-                        setStatusMessage(`'${file.name}' 파일을 처리할 수 없습니다. 파일을 건너뜁니다.`);
-                    }
-                } finally {
-                    if (pdf && pdf.destroy) {
-                        await pdf.destroy();
-                    }
+                    console.warn(`PDF processing failed, falling back to image.`, pdfError);
+                    const image = await fileToBase64(file);
+                    allPageImages.push({ image, pageNumber: 1 });
                 }
             } else {
-                setStatusMessage(`'${file.name}' 이미지 처리 중...`);
                 const image = await fileToBase64(file);
-                pageImages.push({ image, pageNumber: 1 });
+                allPageImages.push({ image, pageNumber: 1 });
             }
-            allPages.push(...pageImages);
         }
-        
-        if (allPages.length === 0) {
-            return [];
-        }
-
-        setStatusMessage(`${allPages.length}개 페이지 병렬 분석 시작... (텍스트 추출 및 영역 분석)`);
-
-        const analysisPromises = allPages.map(async (pageData) => {
-            const { image, pageNumber } = pageData;
-            
-            try {
-                const paragraphs = await extractTextWithCloudVision(image);
-
-                if (!paragraphs || paragraphs.length === 0) {
-                    console.warn(`Skipping page ${pageNumber} due to insufficient text from OCR.`);
-                    return []; 
-                }
-                
-                const img = new Image();
-                img.src = image;
-                await new Promise(resolve => { img.onload = resolve; });
-
-                const problemsWithBbox = await structureTextIntoProblems(paragraphs, img.naturalWidth, img.naturalHeight);
-                
-                let mathProblems;
-                try {
-                    setStatusMessage(`페이지 ${pageNumber}의 ${problemsWithBbox.length}개 텍스트 영역에서 수학 문제 일괄 필터링...`);
-                    mathProblems = await filterMathProblemsBatch(problemsWithBbox);
-                } catch (filterError) {
-                    if (filterError instanceof Error && filterError.message.includes("filterMathProblemsBatch")) {
-                        console.warn("`filterMathProblemsBatch` 프롬프트 로딩 실패. 필터링을 건너뛰고 모든 문제 후보를 진행합니다. 정확도를 높이려면 Firestore 'prompts' 컬렉션에 `filterMathProblemsBatch` 문서를 추가하세요.");
-                        setStatusMessage(`경고: 수학 문제 필터링 실패. 감지된 모든 텍스트 영역을 문제로 간주하고 진행합니다.`);
-                        mathProblems = problemsWithBbox; // FALLBACK: Assume all candidates are math problems
-                    } else {
-                        // For other errors (e.g., API quota), re-throw them.
-                        throw filterError;
-                    }
-                }
-
-                return mathProblems.map(p => ({
-                    pageNumber: pageNumber,
-                    problemText: p.problemText,
-                    pageImage: image,
-                    bbox: p.bbox,
-                }));
-
-            } catch (error) {
-                // This outer catch will now handle errors from extractTextWithCloudVision, structureTextIntoProblems,
-                // or any non-fallback errors from filterMathProblemsBatch.
-                console.error(`Error analyzing page ${pageNumber}:`, error);
-                if (error instanceof Error && error.message.includes('핵심 AI 지침')) {
-                    // Propagate critical prompt errors that don't have a fallback
-                    throw error; 
-                }
-                // For other errors, return an empty array to not break the whole process
-                return [];
-            }
-        });
-
-        const nestedProblems = await Promise.all(analysisPromises);
-        
-        const finalProblems = nestedProblems.flat();
-        
-        return finalProblems;
+        return allPageImages;
     }
 
-    public async createInitialExplanations(
-        analyzedProblems: AnalyzedProblem[],
-        setStatusMessage: (message: string) => void
-    ): Promise<Explanation[]> {
-        const totalProblems = analyzedProblems.length;
-    
-        // First, sort by physical position to have a deterministic fallback order
-        const sortedByPosition = [...analyzedProblems].sort((a, b) => {
-            if (a.pageNumber !== b.pageNumber) {
-                return a.pageNumber - b.pageNumber;
-            }
-            return a.bbox.y_min - b.bbox.y_min;
-        });
-    
-        // Assign problem numbers by parsing text, with a fallback for un-numbered problems
+    async analyzePage(pageData: PageImage): Promise<AnalyzedProblem[]> {
+        try {
+            const detectedProblems = await detectMathProblemsFromImage(pageData.image);
+            return detectedProblems.map(p => ({
+                ...p,
+                pageNumber: pageData.pageNumber,
+                pageImage: pageData.image,
+            }));
+        } catch (error) {
+            console.error(`Error analyzing page ${pageData.pageNumber} with Vision AI:`, error);
+            throw error;
+        }
+    }
+
+    async createInitialExplanations(analyzedProblems: AnalyzedProblem[], totalProblemCount: number, alreadyFound: number): Promise<Explanation[]> {
+        const sortedByPosition = [...analyzedProblems].sort((a, b) => a.bbox.y_min - b.bbox.y_min);
         const problemsWithNumbers = sortedByPosition.map((problem, index) => ({
             ...problem,
-            // If parsing fails, assign a high number to push it to the end, preserving physical order among them
             problemNumber: parseProblemNumberFromText(problem.problemText) ?? (1000 + index),
         }));
     
-        setStatusMessage(`분석된 ${totalProblems}개의 문제 이미지를 잘라내는 중...`);
-    
         const explanationPromises = problemsWithNumbers.map(async (problem) => {
             const croppedImage = await cropImage(problem.pageImage, problem.bbox);
-            
-            const placeholder: Explanation = {
+            return {
                 id: Date.now() + Math.random(),
-                markdown: `해설 생성 대기 중...`, // This will be updated after sorting
+                markdown: ``, // Will be updated after sorting
                 isLoading: true,
                 isError: false,
                 pageNumber: problem.pageNumber,
                 problemNumber: problem.problemNumber,
                 problemImage: croppedImage,
                 originalProblemText: problem.problemText,
+                variationProblem: undefined,
             };
-            return placeholder;
         });
     
         const initialExplanations = await Promise.all(explanationPromises);
-        
-        // Sort by the newly assigned problemNumber to set correct loading message order
         initialExplanations
             .sort((a, b) => a.problemNumber - b.problemNumber)
             .forEach((exp, index) => {
-                exp.markdown = `해설 생성 대기 중... (${index + 1}/${totalProblems})`;
+                exp.markdown = `해설 생성 대기 중... (${alreadyFound + index + 1}/${totalProblemCount})`;
             });
     
         return initialExplanations;
@@ -259,80 +165,92 @@ class ProcessingService {
         explanationMode: ExplanationMode,
         callbacks: ProcessingCallbacks,
         signal: AbortSignal
-    ): Promise<{ refundCount: number }> {
-        let completedCount = 0;
-        let refundCount = 0;
-    
-        const CONCURRENT_LIMIT = 5;
-        const DELAY_BETWEEN_BATCHES = 2000;
+    ): Promise<void> {
+        const failureKeywords = ["풀이를 제공할 수 없", "해설을 생성할 수 없", "풀 수 없", "답변할 수 없"];
+        let generatedCount = 0;
 
-        callbacks.setStatusMessage(`${initialExplanations.length}개의 해설 생성을 병렬로 시작합니다...`);
+        for (const exp of initialExplanations) {
+            if (signal.aborted) return;
+            callbacks.setStatusMessage(`해설 생성 중... (${generatedCount + 1}/${initialExplanations.length})`);
 
-        for (let i = 0; i < initialExplanations.length; i += CONCURRENT_LIMIT) {
-            if (signal.aborted) {
-                console.log("Cancellation detected before starting batch.");
-                break;
+            // 1. Haejeok Cache Check
+            const hash = await simpleHash(exp.problemImage);
+            const cacheRef = doc(db, 'goldenSet', hash);
+            const cacheSnap = await getDoc(cacheRef);
+
+            if (cacheSnap.exists()) {
+                const data = cacheSnap.data();
+                const updated: Explanation = {
+                    ...exp,
+                    markdown: data.markdown,
+                    coreConcepts: data.coreConcepts,
+                    difficulty: data.difficulty,
+                    variationProblem: data.variationProblem,
+                    isLoading: false,
+                    isGolden: true
+                };
+                callbacks.onUpdateExplanation(updated);
+                generatedCount++;
+                continue;
             }
             
-            const batchPlaceholders = initialExplanations.slice(i, i + CONCURRENT_LIMIT);
+            if (signal.aborted) return;
 
-            callbacks.setStatusMessage(`해설 생성 중 (${i + batchPlaceholders.length} / ${initialExplanations.length})...`);
+            // 2. Individual Generation
+            try {
+                const results = await generateExplanationsBatch([exp.originalProblemText], guidelines, explanationMode);
+                if (signal.aborted) return;
 
-            const batchPromises = batchPlaceholders.map((placeholder) => {
-                return (async () => {
-                    if (signal.aborted) return;
-
-                    try {
-                        callbacks.onUpdateExplanation({ ...placeholder, markdown: `[${placeholder.pageNumber}페이지 문제 ${placeholder.problemNumber}] AI 해설 생성 중...` });
-                        const rawMarkdown = await generateExplanation(placeholder.originalProblemText, guidelines, explanationMode);
-                        
-                        const failureKeywords = ["풀이를 제공할 수 없", "해설을 생성할 수 없", "풀 수 없", "답변할 수 없"];
-                        if (!rawMarkdown || failureKeywords.some(keyword => rawMarkdown.includes(keyword))) {
-                            throw new Error("AI가 이 문제에 대한 수학적 풀이를 생성하지 못했습니다. 다른 모드를 시도하거나 문제를 확인해주세요."); 
-                        }
-
-                        if (signal.aborted) return;
-
-                        if (!rawMarkdown.trim()) {
-                            throw new Error("최종 교정 후 해설이 비어있습니다.");
-                        }
-
-                        callbacks.onUpdateExplanation({ ...placeholder, markdown: rawMarkdown, isLoading: false, isError: false });
-                        completedCount++;
-
-                    } catch (error) {
-                        if (signal.aborted) return;
-                        
-                        const errorMessage = error instanceof Error ? error.message : '알 수 없는 오류가 발생했습니다.';
-
-                        // Only count as a refund if the failure was due to the AI's inability to solve,
-                        // not a network or API error.
-                        if (errorMessage.includes("수학적 풀이를 생성하지 못했습니다")) {
-                            refundCount++;
-                        }
-
-                        console.error(`Error processing problem ID ${placeholder.id}:`, error);
-                        callbacks.onUpdateExplanation({ ...placeholder, markdown: errorMessage, isLoading: false, isError: true });
+                const result = results[0]; // Batch call with one item returns an array with one item
+                
+                if (result) {
+                    const processedMarkdown = postProcessMarkdown(result.explanation);
+                    if (!processedMarkdown || failureKeywords.some(keyword => processedMarkdown.includes(keyword))) {
+                        const errorMessage = "AI가 이 문제에 대한 해설 생성을 거부했습니다.";
+                        callbacks.onUpdateExplanation({ ...exp, markdown: errorMessage, isLoading: false, isError: true });
+                        this.logGenerationFailure(exp, guidelines, processedMarkdown);
+                    } else {
+                        const formattedMarkdown = formatMathEquations(processedMarkdown);
+                        const updated: Explanation = { ...exp, markdown: formattedMarkdown, coreConcepts: result.coreConcepts, difficulty: result.difficulty, isLoading: false, variationProblem: undefined };
+                        callbacks.onUpdateExplanation(updated);
                     }
-                })();
-            });
-
-            await Promise.all(batchPromises);
-
-            if (i + CONCURRENT_LIMIT < initialExplanations.length && !signal.aborted) {
-                await new Promise(resolve => setTimeout(resolve, DELAY_BETWEEN_BATCHES));
+                } else {
+                     const errorMessage = "AI가 유효하지 않은 응답을 반환했습니다.";
+                     callbacks.onUpdateExplanation({ ...exp, markdown: errorMessage, isLoading: false, isError: true });
+                     this.logGenerationFailure(exp, guidelines, "AI returned null or undefined result object.");
+                }
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                const isTimeout = errorMessage.toLowerCase().includes('timeout') || errorMessage.includes('504');
+                const finalMessage = isTimeout 
+                    ? "해설 생성 시간이 초과되었습니다. AI 서버가 현재 응답이 느리거나, 문제가 너무 복잡할 수 있습니다."
+                    : `AI 해설 생성 중 오류: ${errorMessage}`;
+                callbacks.onUpdateExplanation({ ...exp, markdown: finalMessage, isLoading: false, isError: true });
+                this.logGenerationFailure(exp, guidelines, `Generation failed: ${errorMessage}`);
             }
+            generatedCount++;
         }
-        
-        return { refundCount };
+    }
+
+    async logGenerationFailure(explanation: Explanation, guidelines: string, failureReason: string) {
+        try {
+            await addDoc(collection(db, "failedGenerations"), {
+                timestamp: serverTimestamp(),
+                originalProblemText: explanation.originalProblemText,
+                problemImage: explanation.problemImage, // Note: This might be a long base64 string if not yet saved
+                guidelines,
+                failureReason,
+            });
+        } catch (error) {
+            console.error("Failed to log generation failure to Firestore:", error);
+        }
     }
 }
 
 let serviceInstance: ProcessingService | null = null;
-
-export function getProcessingService(): ProcessingService {
+export const getProcessingService = (): ProcessingService => {
     if (!serviceInstance) {
         serviceInstance = new ProcessingService();
     }
     return serviceInstance;
-}
+};

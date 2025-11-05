@@ -12,6 +12,10 @@ declare global {
       // This is part of the MathJax 3 API and resolves the type error in ExplanationCard.tsx.
       typesetClear: (nodes?: HTMLElement[]) => void;
     }
+    // [+] Add Prism to global window type to avoid TypeScript errors.
+    Prism?: {
+      highlightAllUnder: (element: Element) => void;
+    };
   }
 }
 

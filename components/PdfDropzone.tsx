@@ -1,5 +1,4 @@
 import React, { useCallback, useState } from 'react';
-import { UploadIcon } from './icons/UploadIcon';
 
 interface FileDropzoneProps {
     onFileProcess: (files: File[]) => void;
@@ -73,7 +72,6 @@ export function FileDropzone({ onFileProcess, dropzoneImageUrl }: FileDropzonePr
                             style={{ backgroundImage: `url(${dropzoneImageUrl})` }}
                         />
                     )}
-                    <UploadIcon />
                     <p className="mt-4 text-lg font-semibold text-accent animate-blink">
                         최고의 해설지가 필요한 문제를 넣어주세요
                     </p>
