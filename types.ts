@@ -8,7 +8,11 @@ export interface Explanation {
     pageNumber: number;
     problemNumber: number;
     problemImage: string; // base64 string before upload, Firebase Storage URL after
-    originalProblemText: string;
+    originalProblemText: string; // The full concatenated text for compatibility
+    problemBody: string; // The question part
+    problemType?: '객관식' | '주관식';
+    choices?: string;
+
 
     // "Dynamic AI Tutor" features
     coreConcepts?: string[];

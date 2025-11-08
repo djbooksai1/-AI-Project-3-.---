@@ -110,8 +110,8 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             if (error instanceof Error) {
                 errorMessage += "\n\n" + error.message;
             } else {
-                // FIX: The 'error' in a catch block is of type 'unknown'. Explicitly convert it to a string before concatenation to avoid type errors.
-                errorMessage = `${errorMessage}\n\n${String(error)}`;
+                // FIX: The 'error' in a catch block is of type 'unknown'. It must be explicitly converted to a string before being used in string concatenation to avoid a type error.
+                errorMessage += "\n\n" + String(error);
             }
             alert(errorMessage);
         }

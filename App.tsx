@@ -1,4 +1,5 @@
 
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { GuidelinesModal } from './components/GuidelinesModal';
@@ -34,6 +35,7 @@ import { SaveIcon } from './components/icons/SaveIcon';
 import { AdminHwpRequestsModal } from './components/AdminHwpRequestsModal';
 import { QuestionMarkCircleIcon } from './components/icons/QuestionMarkCircleIcon';
 import { fileToBase64 } from './services/fileService';
+import { formatMathEquations, generateExplanationsBatch, postProcessMarkdown } from './services/geminiService';
 
 const AuthComponent = ({ appError }: { appError: string | null }) => {
     const [error, setError] = useState('');
@@ -222,6 +224,7 @@ export function App() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [currentExplanationSetId, setCurrentExplanationSetId] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState<Set<number>>(new Set());
+    const [isRetrying, setIsRetrying] = useState<Set<number>>(new Set());
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
     const [userTier, setUserTier] = useState<UserTier>('basic');
@@ -371,7 +374,7 @@ export function App() {
         await loadExplanationSet(setId);
     }, [explanations, loadExplanationSet]);
     
-    const handleCancelProcessing = () => {
+    const handleCancelProcessing = useCallback(() => {
         if (cancellationController.current) {
             cancellationController.current.abort();
             setStatusMessage('해설 생성을 취소하는 중...');
@@ -379,7 +382,7 @@ export function App() {
             setExplanations(prev => prev.filter(exp => !exp.isLoading));
             setTimeout(() => setStatusMessage(null), 2000);
         }
-    };
+    }, []);
 
     const handleFileProcess = async (files: File[]) => {
         if (!files.length || !user) return;
@@ -473,6 +476,73 @@ export function App() {
         return () => window.removeEventListener('paste', handlePaste);
     }, [isProcessing, explanationMode, handleFileProcess]);
 
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                // Priority 1: Close modals/panels
+                if (isGuidelinesOpen) {
+                    setIsGuidelinesOpen(false);
+                    return;
+                }
+                if (isHwpRequestsOpen) {
+                    setIsHwpRequestsOpen(false);
+                    return;
+                }
+                if (isThemeEditorOpen) {
+                    setIsThemeEditorOpen(false);
+                    return;
+                }
+                if (isHistoryOpen) {
+                    setIsHistoryOpen(false);
+                    return;
+                }
+                if (isTermsOpen) {
+                    setIsTermsOpen(false);
+                    return;
+                }
+                if (isPrivacyOpen) {
+                    setIsPrivacyOpen(false);
+                    return;
+                }
+                if (activeQna) {
+                    handleCloseQna();
+                    return;
+                }
+    
+                // Priority 2: Cancel processing
+                if (isProcessing) {
+                    handleCancelProcessing();
+                    return;
+                }
+                
+                // Priority 3: Go home
+                if (explanations.length > 0 && !isProcessing) {
+                    handleGoHome();
+                    return;
+                }
+            }
+        };
+    
+        window.addEventListener('keydown', handleKeyDown);
+    
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [
+        isGuidelinesOpen, 
+        isHwpRequestsOpen,
+        isThemeEditorOpen, 
+        isHistoryOpen, 
+        isTermsOpen,
+        isPrivacyOpen,
+        activeQna, 
+        isProcessing, 
+        explanations.length, 
+        handleGoHome, 
+        handleCloseQna, 
+        handleCancelProcessing
+    ]);
+
     const handleSaveExplanation = useCallback(async (id: number) => {
         if (isSaving.has(id) || !user) return;
         setIsSaving(prev => new Set(prev).add(id));
@@ -500,6 +570,9 @@ export function App() {
                 problemNumber: explanationToSave.problemNumber,
                 problemImage: finalImage,
                 originalProblemText: explanationToSave.originalProblemText,
+                problemBody: explanationToSave.problemBody,
+                problemType: explanationToSave.problemType,
+                choices: explanationToSave.choices,
                 coreConcepts: explanationToSave.coreConcepts || [],
                 difficulty: explanationToSave.difficulty ?? null,
                 variationProblem: explanationToSave.variationProblem === undefined ? null : explanationToSave.variationProblem,
@@ -545,6 +618,57 @@ export function App() {
             setError("해설 세트 삭제에 실패했습니다.");
         }
     };
+    
+    const handleRetryExplanation = useCallback(async (id: number) => {
+        if (!user || isRetrying.has(id)) return;
+        const currentMode = explanationMode;
+        if (!currentMode) {
+            setPromptForMode(true);
+            setTimeout(() => setPromptForMode(false), 2500);
+            return;
+        }
+
+        const expToRetry = explanations.find(e => e.id === id);
+        if (!expToRetry) return;
+
+        setIsRetrying(prev => new Set(prev).add(id));
+        setExplanations(prev => prev.map(exp => 
+            exp.id === id ? { ...exp, isLoading: true, isError: false, markdown: '해설을 다시 생성하는 중...' } : exp
+        ));
+
+        try {
+            const results = await generateExplanationsBatch([expToRetry.originalProblemText], guidelines, currentMode);
+            const result = results[0];
+            
+            if (result) {
+                const processedMarkdown = postProcessMarkdown(result.explanation);
+                const failureKeywords = ["풀이를 제공할 수 없", "해설을 생성할 수 없", "풀 수 없", "답변할 수 없"];
+                if (!processedMarkdown || failureKeywords.some(keyword => processedMarkdown.includes(keyword))) {
+                    throw new Error("AI가 이 문제에 대한 해설 생성을 거부했습니다.");
+                }
+                const formattedMarkdown = formatMathEquations(processedMarkdown);
+                const updated: Explanation = { 
+                    ...expToRetry, 
+                    markdown: formattedMarkdown, 
+                    coreConcepts: result.coreConcepts, 
+                    difficulty: result.difficulty, 
+                    isLoading: false, 
+                    isError: false,
+                };
+                setExplanations(prev => prev.map(exp => exp.id === id ? updated : exp));
+            } else {
+                throw new Error("AI가 유효하지 않은 응답을 반환했습니다.");
+            }
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : '다시 생성 중 알 수 없는 오류가 발생했습니다.';
+            setExplanations(prev => prev.map(exp => 
+                exp.id === id ? { ...exp, isLoading: false, isError: true, markdown: errorMessage } : exp
+            ));
+        } finally {
+            setIsRetrying(prev => { const newSet = new Set(prev); newSet.delete(id); return newSet; });
+        }
+    }, [user, isRetrying, explanationMode, explanations, guidelines]);
+
 
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -684,8 +808,8 @@ export function App() {
                         onOpenHistory={() => setIsHistoryOpen(true)}
                         onSetExplanationMode={setExplanationMode}
                         onLogout={handleLogout}
-                        onOpenGuidelines={() => setIsGuidelinesOpen(true)}
-                        onOpenHwpRequests={() => setIsHwpRequestsOpen(true)}
+                        onOpenGuidelines={() => setIsGuidelinesOpen(false)}
+                        onOpenHwpRequests={() => setIsHwpRequestsOpen(false)}
                     />
                     <main className="w-full max-w-7xl mx-auto p-4 md:p-8 flex-grow">
                         {apiKeyError && <ApiKeyErrorDisplay message={apiKeyError} />}
@@ -741,7 +865,7 @@ export function App() {
                                         </div>
                                         <div className="grid gap-6">
                                             {sortedExplanations.map((exp, index) => (
-                                                <ExplanationCard key={exp.id} id={`exp-card-${exp.id}`} explanation={exp} onDelete={handleDeleteExplanation} onSave={handleSaveExplanation} isSaving={isSaving.has(exp.id)} setRenderedContentRef={(el) => { renderedContentRefs.current[index] = el; }} isSelectionMode={isSelectionMode} isSelected={selectedIds.has(exp.id)} onSelect={toggleSelection} onOpenQna={handleOpenQna} isAdmin={isAdmin} onSaveToCache={handleSaveToCache} />
+                                                <ExplanationCard key={exp.id} id={`exp-card-${exp.id}`} explanation={exp} onDelete={handleDeleteExplanation} onSave={handleSaveExplanation} onRetry={handleRetryExplanation} isSaving={isSaving.has(exp.id)} isRetrying={isRetrying.has(exp.id)} setRenderedContentRef={(el) => { renderedContentRefs.current[index] = el; }} isSelectionMode={isSelectionMode} isSelected={selectedIds.has(exp.id)} onSelect={toggleSelection} onOpenQna={handleOpenQna} isAdmin={isAdmin} onSaveToCache={handleSaveToCache} />
                                             ))}
                                         </div>
                                     </>

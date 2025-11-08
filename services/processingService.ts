@@ -1,5 +1,6 @@
 
 
+
 import { getPdfDocument, renderPdfPageToImage } from './pdfService';
 import { 
     generateExplanationsBatch,
@@ -21,7 +22,9 @@ interface ProcessingCallbacks {
 
 export type AnalyzedProblem = { 
     pageNumber: number; 
-    problemText: string; 
+    problemBody: string;
+    problemType: '객관식' | '주관식';
+    choices?: string;
     pageImage: string; 
     bbox: Bbox;
 };
@@ -131,11 +134,12 @@ class ProcessingService {
         const sortedByPosition = [...analyzedProblems].sort((a, b) => a.bbox.y_min - b.bbox.y_min);
         const problemsWithNumbers = sortedByPosition.map((problem, index) => ({
             ...problem,
-            problemNumber: parseProblemNumberFromText(problem.problemText) ?? (1000 + index),
+            problemNumber: parseProblemNumberFromText(problem.problemBody) ?? (1000 + index),
         }));
     
         const explanationPromises = problemsWithNumbers.map(async (problem) => {
             const croppedImage = await cropImage(problem.pageImage, problem.bbox);
+            const originalProblemText = problem.problemBody + (problem.choices ? `\n${problem.choices}` : '');
             return {
                 id: Date.now() + Math.random(),
                 markdown: ``, // Will be updated after sorting
@@ -144,7 +148,10 @@ class ProcessingService {
                 pageNumber: problem.pageNumber,
                 problemNumber: problem.problemNumber,
                 problemImage: croppedImage,
-                originalProblemText: problem.problemText,
+                originalProblemText: originalProblemText,
+                problemBody: problem.problemBody,
+                problemType: problem.problemType,
+                choices: problem.choices,
                 variationProblem: undefined,
             };
         });

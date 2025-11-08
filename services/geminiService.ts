@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, GenerateContentResponse, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
 import { ExplanationMode, Bbox } from '../types';
 import { getPrompt } from './promptService';
@@ -77,9 +78,10 @@ const safetySettings = [
  */
 export const detectMathProblemsFromImage = async (
     base64Image: string
-): Promise<{ problemText: string; bbox: Bbox }[]> => {
+): Promise<{ problemBody: string; problemType: '객관식' | '주관식'; choices?: string; bbox: Bbox }[]> => {
     try {
-        const prompt = await getPrompt('detectProblemsVision');
+        // Fetch the specialized prompt from Firestore for problem detection with strict LaTeX rules.
+        const prompt = await getPrompt('detectProblemsWithLatex');
         
         const imagePart = {
             inlineData: {
@@ -103,12 +105,21 @@ export const detectMathProblemsFromImage = async (
                         },
                         required: ["x_min", "y_min", "x_max", "y_max"],
                     },
-                    problemText: {
-                        type: Type.STRING,
-                        description: "All text content identified within the bounding box."
+                    problemType: { 
+                        type: Type.STRING, 
+                        enum: ['객관식', '주관식'],
+                        description: "The type of the problem."
                     },
+                    problemBody: {
+                        type: Type.STRING,
+                        description: "The main question text, excluding multiple-choice options, with all math expressions wrapped in LaTeX delimiters ($...$)."
+                    },
+                    choices: {
+                        type: Type.STRING,
+                        description: "The multiple-choice options as a single string, with math in LaTeX. Null if not applicable."
+                    }
                 },
-                required: ["bbox", "problemText"],
+                required: ["bbox", "problemType", "problemBody"],
             },
         };
 
@@ -131,7 +142,7 @@ export const detectMathProblemsFromImage = async (
             return []; // Return empty array if no problems are found or response is empty
         }
         
-        const detectedProblems = JSON.parse(jsonText) as { problemText: string; bbox: Bbox }[];
+        const detectedProblems = JSON.parse(jsonText);
         
         return detectedProblems;
 
@@ -278,9 +289,20 @@ export const generateExplanationsBatch = async (
 };
 
 export const postProcessMarkdown = (markdown: string): string => {
-    let processed = markdown.replace(/^(해설|풀이)전문가:\s*/, '');
-    processed = processed.replace(/```[\s\S]*?```/g, '');
+    let processed = markdown.trim();
+    
+    // The AI sometimes helpfully wraps the entire explanation in a markdown code block.
+    // This removes the fences (e.g., ```json, ```markdown, ```) to prevent rendering issues,
+    // allowing MathJax and the markdown parser to process the content correctly.
+    // This regex handles optional language specifiers and surrounding whitespace.
+    processed = processed.replace(/^```(?:\w+\s*)?\n?([\s\S]*?)\n?```$/, '$1').trim();
+    
+    // Remove "expert" prefixes like '해설전문가:' or '풀이:'
+    processed = processed.replace(/^(해설|풀이)전문가:\s*/, '');
+
+    // Remove leading 'markdown' keyword if present. This is a common AI artifact.
     processed = processed.replace(/^markdown\s*/i, '');
+
     return processed.trim();
 };
 

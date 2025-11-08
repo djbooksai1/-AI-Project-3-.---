@@ -1,7 +1,4 @@
 
-
-
-
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { type Explanation, type QnaData } from '../types';
@@ -16,13 +13,16 @@ import { GoldIcon } from './icons/GoldIcon';
 import { generateVariationNumbersOnly, generateVariationIdeas, generateVariationFromIdea } from '../services/geminiService';
 import { db } from '../firebaseConfig';
 import { doc, getDoc } from 'firebase/firestore';
+import { RetryIcon } from './icons/RetryIcon';
 
 
 interface ExplanationCardProps {
     explanation: Explanation;
     onDelete: (id: number) => void;
     onSave: (id: number) => void;
+    onRetry: (id: number) => void;
     isSaving: boolean;
+    isRetrying: boolean;
     setRenderedContentRef: (el: HTMLDivElement | null) => void;
     id: string;
     isSelectionMode: boolean;
@@ -72,9 +72,10 @@ const DifficultyStars: React.FC<{ level?: number }> = ({ level }) => {
     );
 };
 
-export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, onDelete, onSave, isSaving, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, isAdmin, onSaveToCache }) => {
+export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, onDelete, onSave, onRetry, isSaving, isRetrying, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, isAdmin, onSaveToCache }) => {
     const [isExpanded, setIsExpanded] = useState(true);
     const renderedContentRef = useRef<HTMLDivElement>(null);
+    const recognizedTextRef = useRef<HTMLDivElement>(null);
     const variationContentRef = useRef<HTMLDivElement>(null);
     const { explanationFontSize, explanationMathSize, explanationTextFont, explanationPadding } = useTheme();
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
@@ -149,12 +150,32 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
     useEffect(() => {
         const processContent = async (element: HTMLElement | null) => {
             if (!element) return;
-            if (window.Prism) window.Prism.highlightAllUnder(element);
-            if (window.MathJax?.typesetPromise) await window.MathJax.typesetPromise([element]).catch(err => console.error("MathJax typeset error:", err));
+    
+            // Best practice: Clear previous typesetting before re-running to avoid conflicts.
+            if (window.MathJax?.typesetClear) {
+                window.MathJax.typesetClear([element]);
+            }
+    
+            // Highlight code blocks with Prism.js
+            if (window.Prism) {
+                window.Prism.highlightAllUnder(element);
+            }
+    
+            // Typeset mathematical equations with MathJax.
+            if (window.MathJax?.typesetPromise) {
+                await window.MathJax.typesetPromise([element]).catch(err => console.error("MathJax typeset error:", err));
+            }
         };
-        if (isExpanded) processContent(renderedContentRef.current);
-        if (generatedVariation) processContent(variationContentRef.current);
-    }, [explanation.markdown, generatedVariation, isExpanded, explanationFontSize, explanationMathSize, explanationTextFont, isSelectionMode]);
+    
+        if (isExpanded) {
+            processContent(renderedContentRef.current);
+            processContent(recognizedTextRef.current);
+        }
+        if (generatedVariation) {
+            processContent(variationContentRef.current);
+        }
+    }, [explanation.markdown, explanation.problemBody, explanation.choices, generatedVariation, isExpanded]);
+    
 
     const handleTextClick = useCallback((event: React.MouseEvent<HTMLElement>, rawMarkdownFragment: string) => {
         if (isSelectionMode) return;
@@ -169,7 +190,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
         });
     }, [onOpenQna, explanation, isSelectionMode]);
 
-    const renderMarkdown = useMemo((): Components => {
+    const renderMarkdownForExplanation = useMemo((): Components => {
         const getRawMarkdownFromNode = (node: any): string => {
             if (node?.position?.start?.offset !== undefined && node?.position?.end?.offset !== undefined) {
                 return explanation.markdown.slice(node.position.start.offset, node.position.end.offset);
@@ -222,16 +243,44 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                 </div>
                 <div className="flex items-center gap-2">
                     {isAdmin && !explanation.isGolden && <button onClick={() => onSaveToCache(explanation)} className="p-2 rounded-full text-text-secondary hover:bg-gold hover:text-black" title="캐시에 저장"><GoldIcon /></button>}
-                    {!explanation.docId ? <button onClick={() => onSave(explanation.id)} disabled={isSaving} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50" title="저장">{isSaving ? <svg className="animate-spin h-5 w-5" xmlns="http://www.w.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <SaveIcon />}</button> : <div className="p-2 text-success" title="저장됨"><CheckIcon /></div>}
+                    <button onClick={() => onRetry(explanation.id)} disabled={explanation.isLoading || isRetrying} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" title="다시쓰기"><RetryIcon /></button>
+                    {!explanation.docId ? <button onClick={() => onSave(explanation.id)} disabled={isSaving} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50" title="저장">{isSaving ? <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <SaveIcon />}</button> : <div className="p-2 text-success" title="저장됨"><CheckIcon /></div>}
                     <button onClick={() => onDelete(explanation.id)} className="p-2 rounded-full text-text-secondary hover:bg-danger hover:text-white" title="삭제"><XIcon /></button>
                     <button onClick={() => setIsExpanded(!isExpanded)} className="p-2 rounded-full text-text-secondary hover:bg-primary" title={isExpanded ? "접기" : "펼치기"}>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</button>
                 </div>
             </div>
             {isExpanded && (
-                <div className="grid grid-cols-1">
-                    {/* Problem Image Part */}
-                    <div className="p-4 flex justify-center">
-                        <img src={explanation.problemImage} alt={`Problem ${explanation.problemNumber}`} onClick={() => setIsImageModalOpen(true)} className="max-h-72 w-auto object-contain rounded-md bg-background cursor-zoom-in" />
+                <>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
+                        {/* Problem Image Part */}
+                        <div className="flex flex-col">
+                            <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">업로드된 문제 이미지</h4>
+                            <div className="flex-grow flex items-center justify-center p-2 bg-background rounded-md border border-primary/30 min-h-[150px]">
+                                <img 
+                                    src={explanation.problemImage} 
+                                    alt={`Problem ${explanation.problemNumber}`} 
+                                    onClick={() => setIsImageModalOpen(true)} 
+                                    className="max-h-60 w-auto object-contain rounded-sm cursor-zoom-in" 
+                                />
+                            </div>
+                        </div>
+                        {/* Recognized Text Part */}
+                        <div className="flex flex-col">
+                            <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">해적이 인식한 문제</h4>
+                            <div 
+                                ref={recognizedTextRef} 
+                                className="prose prose-sm max-w-none text-text-primary bg-background p-3 rounded-md border border-primary/30 flex-grow overflow-y-auto max-h-60 min-h-[150px]"
+                                style={{ fontSize: `${explanationFontSize}px`, '--tw-prose-body': 'var(--color-text-primary)', fontFamily: explanationTextFont.family } as React.CSSProperties}
+                            >
+                                <style>{`.prose .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
+                                <ReactMarkdown>{explanation.problemBody || "텍스트를 인식하지 못했습니다."}</ReactMarkdown>
+                                {explanation.problemType === '객관식' && explanation.choices && (
+                                    <div className="bg-background p-3 rounded-md border border-primary/50 mt-4">
+                                        <ReactMarkdown>{explanation.choices}</ReactMarkdown>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     </div>
                     {/* Explanation Part */}
                     <div className="flex flex-col">
@@ -247,7 +296,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                             {explanation.isLoading ? <div className="p-6 h-full flex items-center justify-center"><Loader status={explanation.markdown} /></div> : explanation.isError ? <div className="p-6 text-center text-danger"><p>{explanation.markdown}</p></div> : (
                                 <div ref={renderedContentRef} className="explanation-content prose prose-sm max-w-none text-text-primary" style={{ fontSize: `${explanationFontSize}px`, '--tw-prose-body': 'var(--color-text-primary)', fontFamily: explanationTextFont.family, padding: `${explanationPadding}px` } as React.CSSProperties}>
                                     <style>{`.explanation-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
-                                    <ReactMarkdown components={renderMarkdown}>{explanation.markdown}</ReactMarkdown>
+                                    <ReactMarkdown components={renderMarkdownForExplanation}>{explanation.markdown}</ReactMarkdown>
                                 </div>
                             )}
                         </div>
@@ -311,7 +360,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                             </div>
                         </div>
                     </div>
-                </div>
+                </>
             )}
         </div>
     );
