@@ -13,5 +13,6 @@ export default defineConfig({
   preview: {
     port: 8080,
     host: true,
+    allowedHosts: ['.a.run.app'] // <--- 이 줄을 추가하세요
   }
 })
