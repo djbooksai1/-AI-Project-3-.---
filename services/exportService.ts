@@ -164,3 +164,49 @@ export const exportToHtml = async (
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href);
 };
+
+export const exportMultipleExplanationsToHwp = async (explanations: Explanation[]): Promise<void> => {
+    if (explanations.length === 0) {
+        throw new Error("HWP로 내보낼 해설이 선택되지 않았습니다.");
+    }
+
+    const combinedContent = explanations
+        .sort((a, b) => a.problemNumber - b.problemNumber)
+        .map(exp => `[문제 ${exp.problemNumber}]\n${exp.originalProblemText}\n\n[해설]\n${exp.markdown}`)
+        .join('\n\n\n');
+
+    try {
+        const response = await fetch('https://hml-generator-service-646620208083.asia-northeast3.run.app/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                content: combinedContent,
+                treatAsChar: true,
+                textSize: 12,
+                equationSize: 9,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HWP 생성 서버 오류: ${response.status} ${errorText}`);
+        }
+
+        const blob = await response.blob();
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        const date = new Date();
+        const filename = `해적_해설집_${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}.hwp`;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+
+    } catch (error) {
+        console.error("Error generating HWP file:", error);
+        throw error;
+    }
+};

@@ -1,3 +1,5 @@
+
+
 import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { themes as availableThemes, Theme } from '../config/themes';
 import { textFonts as availableTextFonts, Font } from '../config/fonts';
@@ -110,7 +112,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             if (error instanceof Error) {
                 errorMessage += "\n\n" + error.message;
             } else {
-                // FIX: The 'error' in a catch block is of type 'unknown'. It must be explicitly converted to a string before being used in string concatenation to avoid a type error.
+                // FIX: In a `catch` block, `error` is of type `unknown`. Explicitly convert it to a string before concatenation.
                 errorMessage += "\n\n" + String(error);
             }
             alert(errorMessage);

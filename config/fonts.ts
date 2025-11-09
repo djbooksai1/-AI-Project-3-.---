@@ -4,8 +4,8 @@ export interface Font {
 }
 
 export const textFonts: Font[] = [
-    { name: 'KoPubWorld돋움체', family: "'KoPubWorldDotum', sans-serif" },
-    { name: 'KoPubWorld바탕체', family: "'KoPubWorldBatang', serif" },
+    { name: '고운돋움', family: "'Gowun Dodum', sans-serif" },
+    { name: '고운바탕', family: "'Gowun Batang', serif" },
     { name: 'Spoqa Han Sans Neo', family: "'Spoqa Han Sans Neo', sans-serif" },
-    { name: '나눔명조', family: "'NanumMyeongjo', serif" },
+    { name: '나눔명조', family: "'Nanum Myeongjo', serif" },
 ];

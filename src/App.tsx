@@ -7,7 +7,7 @@ import { Loader } from './components/Loader';
 import { ExplanationCard } from './components/ExplanationCard';
 import { PdfIcon } from './components/icons/PdfIcon';
 import { HwpIcon } from './components/icons/HwpIcon';
-import { exportToPdf, exportToHtml } from './services/exportService';
+import { exportMultipleExplanationsToHwp } from './services/exportService';
 import { Explanation, ExplanationMode, QnaData, ExplanationSet, UsageData, UserTier, HwpExplanationData } from './types';
 import { getProcessingService } from './services/processingService';
 import { useTheme } from './hooks/useTheme';
@@ -34,12 +34,7 @@ import { SaveIcon } from './components/icons/SaveIcon';
 import { AdminHwpRequestsModal } from './components/AdminHwpRequestsModal';
 import { QuestionMarkCircleIcon } from './components/icons/QuestionMarkCircleIcon';
 import { fileToBase64 } from './services/fileService';
-
-declare global {
-  interface Window {
-    recaptchaVerifier?: RecaptchaVerifier;
-  }
-}
+import { formatMathEquations, generateExplanationsBatch, postProcessMarkdown } from './services/geminiService';
 
 const AuthComponent = ({ appError }: { appError: string | null }) => {
     const [error, setError] = useState('');
@@ -49,22 +44,22 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
     const [isCodeSent, setIsCodeSent] = useState(false);
     const [isSendingCode, setIsSendingCode] = useState(false);
     
+    const recaptchaVerifierRef = useRef<RecaptchaVerifier | null>(null);
+    const recaptchaContainerRef = useRef<HTMLDivElement | null>(null);
+
     const displayError = appError || error;
 
     useEffect(() => {
-        if (!window.recaptchaVerifier && document.getElementById('recaptcha-container')) {
-            window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        if (recaptchaContainerRef.current && !recaptchaVerifierRef.current) {
+            const verifier = new RecaptchaVerifier(auth, recaptchaContainerRef.current, {
                 'size': 'invisible',
                 'callback': () => {},
                 'expired-callback': () => {
                     setError('reCAPTCHA 인증이 만료되었습니다. 다시 시도해주세요.');
-                    if (window.recaptchaVerifier) {
-                        window.recaptchaVerifier.clear();
-                        delete window.recaptchaVerifier;
-                    }
                 }
             });
-            window.recaptchaVerifier.render();
+            verifier.render();
+            recaptchaVerifierRef.current = verifier;
         }
     }, []);
 
@@ -79,7 +74,7 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
         setIsSendingCode(true);
 
         try {
-            const appVerifier = window.recaptchaVerifier;
+            const appVerifier = recaptchaVerifierRef.current;
              if (!appVerifier) {
                 setError('reCAPTCHA를 초기화하지 못했습니다. 페이지를 새로고침하고 다시 시도해주세요.');
                 setIsSendingCode(false);
@@ -181,7 +176,7 @@ const AuthComponent = ({ appError }: { appError: string | null }) => {
                         )}
                     </div>
                     {displayError && <p className="text-sm text-center text-danger mt-4">{displayError}</p>}
-                    <div id="recaptcha-container" className="flex justify-center mt-4"></div>
+                    <div id="recaptcha-container" ref={recaptchaContainerRef} className="flex justify-center mt-4"></div>
                 </div>
             </div>
         </div>
@@ -197,6 +192,20 @@ const TIER_LIMITS: { [key in UserTier]: UsageData } = {
 
 const getTodayDateString = () => new Date().toISOString().slice(0, 10);
 const newId = () => Date.now() + Math.random();
+
+const isApiConfigError = (message: string): boolean => {
+    const lowerCaseMessage = message.toLowerCase();
+    const keywords = [
+        'permission', 
+        'api key',
+        'billing',
+        'api has not been used',
+        'enable the api',
+        'not enabled',
+        '핵심 ai 지침', // Custom error from getPrompt
+    ];
+    return keywords.some(keyword => lowerCaseMessage.includes(keyword));
+};
 
 export function App() {
     const [user, setUser] = useState<User | null>(null);
@@ -214,6 +223,7 @@ export function App() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [currentExplanationSetId, setCurrentExplanationSetId] = useState<string | null>(null);
     const [isSaving, setIsSaving] = useState<Set<number>>(new Set());
+    const [isRetrying, setIsRetrying] = useState<Set<number>>(new Set());
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
     const [userTier, setUserTier] = useState<UserTier>('basic');
@@ -363,7 +373,7 @@ export function App() {
         await loadExplanationSet(setId);
     }, [explanations, loadExplanationSet]);
     
-    const handleCancelProcessing = () => {
+    const handleCancelProcessing = useCallback(() => {
         if (cancellationController.current) {
             cancellationController.current.abort();
             setStatusMessage('해설 생성을 취소하는 중...');
@@ -371,7 +381,7 @@ export function App() {
             setExplanations(prev => prev.filter(exp => !exp.isLoading));
             setTimeout(() => setStatusMessage(null), 2000);
         }
-    };
+    }, []);
 
     const handleFileProcess = async (files: File[]) => {
         if (!files.length || !user) return;
@@ -403,7 +413,7 @@ export function App() {
                 
                 if (analyzedProblemsOnPage.length > 0) {
                     const initialExplanations = await service.createInitialExplanations(analyzedProblemsOnPage, totalProblemsFound + analyzedProblemsOnPage.length, totalProblemsFound);
-                    setExplanations(prev => [...prev, ...initialExplanations]);
+                    setExplanations(prev => [...prev, ...initialExplanations].sort((a,b) => a.problemNumber - b.problemNumber));
                     allInitialExplanations.push(...initialExplanations);
                     totalProblemsFound += analyzedProblemsOnPage.length;
                 }
@@ -465,6 +475,73 @@ export function App() {
         return () => window.removeEventListener('paste', handlePaste);
     }, [isProcessing, explanationMode, handleFileProcess]);
 
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                // Priority 1: Close modals/panels
+                if (isGuidelinesOpen) {
+                    setIsGuidelinesOpen(false);
+                    return;
+                }
+                if (isHwpRequestsOpen) {
+                    setIsHwpRequestsOpen(false);
+                    return;
+                }
+                if (isThemeEditorOpen) {
+                    setIsThemeEditorOpen(false);
+                    return;
+                }
+                if (isHistoryOpen) {
+                    setIsHistoryOpen(false);
+                    return;
+                }
+                if (isTermsOpen) {
+                    setIsTermsOpen(false);
+                    return;
+                }
+                if (isPrivacyOpen) {
+                    setIsPrivacyOpen(false);
+                    return;
+                }
+                if (activeQna) {
+                    handleCloseQna();
+                    return;
+                }
+    
+                // Priority 2: Cancel processing
+                if (isProcessing) {
+                    handleCancelProcessing();
+                    return;
+                }
+                
+                // Priority 3: Go home
+                if (explanations.length > 0 && !isProcessing) {
+                    handleGoHome();
+                    return;
+                }
+            }
+        };
+    
+        window.addEventListener('keydown', handleKeyDown);
+    
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [
+        isGuidelinesOpen, 
+        isHwpRequestsOpen,
+        isThemeEditorOpen, 
+        isHistoryOpen, 
+        isTermsOpen,
+        isPrivacyOpen,
+        activeQna, 
+        isProcessing, 
+        explanations.length, 
+        handleGoHome, 
+        handleCloseQna, 
+        handleCancelProcessing
+    ]);
+
     const handleSaveExplanation = useCallback(async (id: number) => {
         if (isSaving.has(id) || !user) return;
         setIsSaving(prev => new Set(prev).add(id));
@@ -484,7 +561,7 @@ export function App() {
             }
 
             const finalImage = explanationToSave.problemImage.startsWith('data:image') ? await uploadProblemImage(user.uid, explanationToSave.problemImage) : explanationToSave.problemImage;
-            
+
             // Create a clean object for Firestore, converting undefined to null and removing UI state.
             const dataForFirestore = {
                 markdown: explanationToSave.markdown,
@@ -492,6 +569,9 @@ export function App() {
                 problemNumber: explanationToSave.problemNumber,
                 problemImage: finalImage,
                 originalProblemText: explanationToSave.originalProblemText,
+                problemBody: explanationToSave.problemBody,
+                problemType: explanationToSave.problemType,
+                choices: explanationToSave.choices,
                 coreConcepts: explanationToSave.coreConcepts || [],
                 difficulty: explanationToSave.difficulty ?? null,
                 variationProblem: explanationToSave.variationProblem === undefined ? null : explanationToSave.variationProblem,
@@ -537,6 +617,57 @@ export function App() {
             setError("해설 세트 삭제에 실패했습니다.");
         }
     };
+    
+    const handleRetryExplanation = useCallback(async (id: number) => {
+        if (!user || isRetrying.has(id)) return;
+        const currentMode = explanationMode;
+        if (!currentMode) {
+            setPromptForMode(true);
+            setTimeout(() => setPromptForMode(false), 2500);
+            return;
+        }
+
+        const expToRetry = explanations.find(e => e.id === id);
+        if (!expToRetry) return;
+
+        setIsRetrying(prev => new Set(prev).add(id));
+        setExplanations(prev => prev.map(exp => 
+            exp.id === id ? { ...exp, isLoading: true, isError: false, markdown: '해설을 다시 생성하는 중...' } : exp
+        ));
+
+        try {
+            const results = await generateExplanationsBatch([expToRetry.originalProblemText], guidelines, currentMode);
+            const result = results[0];
+            
+            if (result) {
+                const processedMarkdown = postProcessMarkdown(result.explanation);
+                const failureKeywords = ["풀이를 제공할 수 없", "해설을 생성할 수 없", "풀 수 없", "답변할 수 없"];
+                if (!processedMarkdown || failureKeywords.some(keyword => processedMarkdown.includes(keyword))) {
+                    throw new Error("AI가 이 문제에 대한 해설 생성을 거부했습니다.");
+                }
+                const formattedMarkdown = formatMathEquations(processedMarkdown);
+                const updated: Explanation = { 
+                    ...expToRetry, 
+                    markdown: formattedMarkdown, 
+                    coreConcepts: result.coreConcepts, 
+                    difficulty: result.difficulty, 
+                    isLoading: false, 
+                    isError: false,
+                };
+                setExplanations(prev => prev.map(exp => exp.id === id ? updated : exp));
+            } else {
+                throw new Error("AI가 유효하지 않은 응답을 반환했습니다.");
+            }
+        } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : '다시 생성 중 알 수 없는 오류가 발생했습니다.';
+            setExplanations(prev => prev.map(exp => 
+                exp.id === id ? { ...exp, isLoading: false, isError: true, markdown: errorMessage } : exp
+            ));
+        } finally {
+            setIsRetrying(prev => { const newSet = new Set(prev); newSet.delete(id); return newSet; });
+        }
+    }, [user, isRetrying, explanationMode, explanations, guidelines]);
+
 
     const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
@@ -581,22 +712,29 @@ export function App() {
     }, [selectedIds, explanations, handleSaveExplanation]);
 
     const handleHwpRequest = async () => {
-        if (userTier === 'basic' || selectedIds.size === 0 || !user) return;
-        const selectedExplanations = explanations.filter(exp => selectedIds.has(exp.id));
-        if (selectedExplanations.some(exp => !exp.docId || exp.problemImage.startsWith('data:image'))) {
-            return alert(`저장되지 않은 해설이 있습니다. '선택 저장' 버튼을 눌러 먼저 모든 해설을 저장해주세요.`);
+        if (userTier === 'basic') {
+            alert("HWP 파일 변환은 '샤프' 등급 이상부터 사용 가능합니다.");
+            return;
         }
-        setStatusMessage("HWP 변환 요청 접수 중...");
+        if (selectedIds.size === 0 || !user) {
+            return;
+        }
+    
+        const selectedExplanations = explanations
+            .filter(exp => selectedIds.has(exp.id))
+            .sort((a, b) => a.problemNumber - b.problemNumber);
+    
+        setStatusMessage(`${selectedExplanations.length}개 해설 HWP 변환 중...`);
         setIsProcessing(true);
+    
         try {
-            const requestData: HwpExplanationData[] = selectedExplanations.map(exp => ({ problemImage: exp.problemImage, markdown: exp.markdown, problemNumber: exp.problemNumber }));
-            await addDoc(collection(db, "hwpRequests"), { userId: user.uid, userEmail: user.email || 'N/A', createdAt: serverTimestamp(), status: 'pending', explanations: requestData });
-            alert("접수 되었습니다. 관리자 확인 후 마이페이지에서 파일을 받으실 수 있습니다.");
+            await exportMultipleExplanationsToHwp(selectedExplanations);
+            setStatusMessage("HWP 파일 다운로드가 시작되었습니다.");
         } catch (error) {
-            setError("HWP 요청 접수에 실패했습니다.");
+            setError(error instanceof Error ? error.message : "HWP 파일 변환에 실패했습니다.");
         } finally {
             setIsProcessing(false);
-            setStatusMessage(null);
+            setTimeout(() => setStatusMessage(null), 3000);
         }
     };
     
@@ -676,7 +814,9 @@ export function App() {
                         onOpenHistory={() => setIsHistoryOpen(true)}
                         onSetExplanationMode={setExplanationMode}
                         onLogout={handleLogout}
+                        // FIX: Changed to setIsGuidelinesOpen(true) to correctly open the modal.
                         onOpenGuidelines={() => setIsGuidelinesOpen(true)}
+                        // FIX: Changed to setIsHwpRequestsOpen(true) to correctly open the modal.
                         onOpenHwpRequests={() => setIsHwpRequestsOpen(true)}
                     />
                     <main className="w-full max-w-7xl mx-auto p-4 md:p-8 flex-grow">
@@ -717,7 +857,7 @@ export function App() {
                                                         <button onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-danger/20 text-danger rounded-md hover:bg-danger/30 disabled:opacity-50"><TrashIcon/> 선택 삭제</button>
                                                     </>
                                                 )}
-                                                <button onClick={handleHwpRequest} disabled={!isSelectionMode || selectedIds.size === 0 || userTier === 'basic'} className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary hover:border-accent disabled:opacity-50 group">
+                                                <button onClick={handleHwpRequest} disabled={!isSelectionMode || selectedIds.size === 0} className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary hover:border-accent disabled:opacity-50 group">
                                                     <span className="relative flex items-center gap-2"><HwpIcon /> 한글(HWP)</span>
                                                     <div className="relative group/tooltip ml-1.5"><QuestionMarkCircleIcon />
                                                         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max px-3 py-1.5 text-xs text-white bg-gray-900/80 rounded-md opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap z-10">샤프등급이상부터 사용가능합니다<div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-900/80"></div></div>
@@ -733,7 +873,7 @@ export function App() {
                                         </div>
                                         <div className="grid gap-6">
                                             {sortedExplanations.map((exp, index) => (
-                                                <ExplanationCard key={exp.id} id={`exp-card-${exp.id}`} explanation={exp} onDelete={handleDeleteExplanation} onSave={handleSaveExplanation} isSaving={isSaving.has(exp.id)} setRenderedContentRef={(el) => { renderedContentRefs.current[index] = el; }} isSelectionMode={isSelectionMode} isSelected={selectedIds.has(exp.id)} onSelect={toggleSelection} onOpenQna={handleOpenQna} isAdmin={isAdmin} onSaveToCache={handleSaveToCache} />
+                                                <ExplanationCard key={exp.id} id={`exp-card-${exp.id}`} explanation={exp} onDelete={handleDeleteExplanation} onSave={handleSaveExplanation} onRetry={handleRetryExplanation} isSaving={isSaving.has(exp.id)} isRetrying={isRetrying.has(exp.id)} setRenderedContentRef={(el) => { renderedContentRefs.current[index] = el; }} isSelectionMode={isSelectionMode} isSelected={selectedIds.has(exp.id)} onSelect={toggleSelection} onOpenQna={handleOpenQna} isAdmin={isAdmin} onSaveToCache={handleSaveToCache} />
                                             ))}
                                         </div>
                                     </>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
 import ReactMarkdown, { Components } from 'react-markdown';
 import { type Explanation, type QnaData } from '../types';
@@ -243,7 +242,7 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                 </div>
                 <div className="flex items-center gap-2">
                     {isAdmin && !explanation.isGolden && <button onClick={() => onSaveToCache(explanation)} className="p-2 rounded-full text-text-secondary hover:bg-gold hover:text-black" title="캐시에 저장"><GoldIcon /></button>}
-                    <button onClick={() => onRetry(explanation.id)} disabled={explanation.isLoading || isRetrying} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" title="다시쓰기"><RetryIcon /></button>
+                    <button onClick={() => onRetry(explanation.id)} disabled={explanation.isLoading || isRetrying} className="p-2 rounded-full text-danger hover:bg-danger hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" title="다시쓰기"><RetryIcon /></button>
                     {!explanation.docId ? <button onClick={() => onSave(explanation.id)} disabled={isSaving} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50" title="저장">{isSaving ? <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <SaveIcon />}</button> : <div className="p-2 text-success" title="저장됨"><CheckIcon /></div>}
                     <button onClick={() => onDelete(explanation.id)} className="p-2 rounded-full text-text-secondary hover:bg-danger hover:text-white" title="삭제"><XIcon /></button>
                     <button onClick={() => setIsExpanded(!isExpanded)} className="p-2 rounded-full text-text-secondary hover:bg-primary" title={isExpanded ? "접기" : "펼치기"}>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</button>
@@ -254,8 +253,8 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
                         {/* Problem Image Part */}
                         <div className="flex flex-col">
-                            <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">업로드된 문제 이미지</h4>
-                            <div className="flex-grow flex items-center justify-center p-2 bg-background rounded-md border border-primary/30 min-h-[150px]">
+                            <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">인식된 페이지</h4>
+                            <div className="flex-grow flex items-center justify-center p-2 bg-background rounded-md border border-primary/30 min-h-[150px] overflow-hidden">
                                 <img 
                                     src={explanation.problemImage} 
                                     alt={`Problem ${explanation.problemNumber}`} 
@@ -269,10 +268,10 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                             <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">해적이 인식한 문제</h4>
                             <div 
                                 ref={recognizedTextRef} 
-                                className="prose prose-sm max-w-none text-text-primary bg-background p-3 rounded-md border border-primary/30 flex-grow overflow-y-auto max-h-60 min-h-[150px]"
-                                style={{ fontSize: `${explanationFontSize}px`, '--tw-prose-body': 'var(--color-text-primary)', fontFamily: explanationTextFont.family } as React.CSSProperties}
+                                className="recognized-text-content max-w-none text-text-primary bg-background p-3 rounded-md border border-primary/30 flex-grow overflow-y-auto max-h-60 min-h-[150px]"
+                                style={{ fontSize: `${explanationFontSize}px`, fontFamily: explanationTextFont.family } as React.CSSProperties}
                             >
-                                <style>{`.prose .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
+                                <style>{`.recognized-text-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
                                 <ReactMarkdown>{explanation.problemBody || "텍스트를 인식하지 못했습니다."}</ReactMarkdown>
                                 {explanation.problemType === '객관식' && explanation.choices && (
                                     <div className="bg-background p-3 rounded-md border border-primary/50 mt-4">

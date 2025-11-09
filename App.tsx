@@ -1,5 +1,7 @@
 
 
+
+
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { GuidelinesModal } from './components/GuidelinesModal';
@@ -8,7 +10,7 @@ import { Loader } from './components/Loader';
 import { ExplanationCard } from './components/ExplanationCard';
 import { PdfIcon } from './components/icons/PdfIcon';
 import { HwpIcon } from './components/icons/HwpIcon';
-import { exportToPdf, exportToHtml } from './services/exportService';
+import { exportMultipleExplanationsToHwp } from './services/exportService';
 import { Explanation, ExplanationMode, QnaData, ExplanationSet, UsageData, UserTier, HwpExplanationData } from './types';
 import { getProcessingService } from './services/processingService';
 import { useTheme } from './hooks/useTheme';
@@ -713,22 +715,29 @@ export function App() {
     }, [selectedIds, explanations, handleSaveExplanation]);
 
     const handleHwpRequest = async () => {
-        if (userTier === 'basic' || selectedIds.size === 0 || !user) return;
-        const selectedExplanations = explanations.filter(exp => selectedIds.has(exp.id));
-        if (selectedExplanations.some(exp => !exp.docId || exp.problemImage.startsWith('data:image'))) {
-            return alert(`저장되지 않은 해설이 있습니다. '선택 저장' 버튼을 눌러 먼저 모든 해설을 저장해주세요.`);
+        if (userTier === 'basic') {
+            alert("HWP 파일 변환은 '샤프' 등급 이상부터 사용 가능합니다.");
+            return;
         }
-        setStatusMessage("HWP 변환 요청 접수 중...");
+        if (selectedIds.size === 0 || !user) {
+            return;
+        }
+    
+        const selectedExplanations = explanations
+            .filter(exp => selectedIds.has(exp.id))
+            .sort((a, b) => a.problemNumber - b.problemNumber);
+    
+        setStatusMessage(`${selectedExplanations.length}개 해설 HWP 변환 중...`);
         setIsProcessing(true);
+    
         try {
-            const requestData: HwpExplanationData[] = selectedExplanations.map(exp => ({ problemImage: exp.problemImage, markdown: exp.markdown, problemNumber: exp.problemNumber }));
-            await addDoc(collection(db, "hwpRequests"), { userId: user.uid, userEmail: user.email || 'N/A', createdAt: serverTimestamp(), status: 'pending', explanations: requestData });
-            alert("접수 되었습니다. 관리자 확인 후 마이페이지에서 파일을 받으실 수 있습니다.");
+            await exportMultipleExplanationsToHwp(selectedExplanations);
+            setStatusMessage("HWP 파일 다운로드가 시작되었습니다.");
         } catch (error) {
-            setError("HWP 요청 접수에 실패했습니다.");
+            setError(error instanceof Error ? error.message : "HWP 파일 변환에 실패했습니다.");
         } finally {
             setIsProcessing(false);
-            setStatusMessage(null);
+            setTimeout(() => setStatusMessage(null), 3000);
         }
     };
     
@@ -808,8 +817,10 @@ export function App() {
                         onOpenHistory={() => setIsHistoryOpen(true)}
                         onSetExplanationMode={setExplanationMode}
                         onLogout={handleLogout}
-                        onOpenGuidelines={() => setIsGuidelinesOpen(false)}
-                        onOpenHwpRequests={() => setIsHwpRequestsOpen(false)}
+                        // FIX: Changed to setIsGuidelinesOpen(true) to correctly open the modal.
+                        onOpenGuidelines={() => setIsGuidelinesOpen(true)}
+                        // FIX: Changed to setIsHwpRequestsOpen(true) to correctly open the modal.
+                        onOpenHwpRequests={() => setIsHwpRequestsOpen(true)}
                     />
                     <main className="w-full max-w-7xl mx-auto p-4 md:p-8 flex-grow">
                         {apiKeyError && <ApiKeyErrorDisplay message={apiKeyError} />}
@@ -849,7 +860,7 @@ export function App() {
                                                         <button onClick={handleDeleteSelected} disabled={selectedIds.size === 0} className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-danger/20 text-danger rounded-md hover:bg-danger/30 disabled:opacity-50"><TrashIcon/> 선택 삭제</button>
                                                     </>
                                                 )}
-                                                <button onClick={handleHwpRequest} disabled={!isSelectionMode || selectedIds.size === 0 || userTier === 'basic'} className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary hover:border-accent disabled:opacity-50 group">
+                                                <button onClick={handleHwpRequest} disabled={!isSelectionMode || selectedIds.size === 0} className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary hover:border-accent disabled:opacity-50 group">
                                                     <span className="relative flex items-center gap-2"><HwpIcon /> 한글(HWP)</span>
                                                     <div className="relative group/tooltip ml-1.5"><QuestionMarkCircleIcon />
                                                         <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max px-3 py-1.5 text-xs text-white bg-gray-900/80 rounded-md opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap z-10">샤프등급이상부터 사용가능합니다<div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-900/80"></div></div>
