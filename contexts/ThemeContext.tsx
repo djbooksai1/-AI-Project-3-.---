@@ -106,12 +106,9 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             console.log("Theme settings saved to Firestore.");
         } catch (error) {
             console.error("Error saving theme settings to Firestore: ", error);
-            // FIX: The user-reported error indicates a problem with an 'unknown' type being used as a 'string'.
-            // Although the existing code appears correct, this change explicitly wraps the entire result of the
-            // error handling logic in String() to ensure the final value is unequivocally a string. This
-            // should satisfy a strict or misconfigured TypeScript linter that may be failing to infer
-            // the type correctly from the ternary operator.
-            const errorDetails = String(error instanceof Error ? error.message : error);
+            // FIX: Explicitly handle the 'unknown' type of the error object from the catch block
+            // to create a string for the error message, resolving the TypeScript error.
+            const errorDetails = error instanceof Error ? error.message : String(error);
             const errorMessage = `테마 설정을 저장하는 데 실패했습니다.\n\n${errorDetails}`;
             alert(errorMessage);
         }
