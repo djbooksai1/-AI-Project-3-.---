@@ -106,8 +106,8 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             console.log("Theme settings saved to Firestore.");
         } catch (error) {
             console.error("Error saving theme settings to Firestore: ", error);
-            // FIX: Explicitly handle the 'unknown' type of the error object from the catch block
-            // to create a string for the error message, resolving the TypeScript error.
+            // The 'error' object in a catch clause is of type 'unknown'. We must verify it's an
+            // instance of Error before accessing its properties, or convert it to a string.
             const errorDetails = error instanceof Error ? error.message : String(error);
             const errorMessage = `테마 설정을 저장하는 데 실패했습니다.\n\n${errorDetails}`;
             alert(errorMessage);
