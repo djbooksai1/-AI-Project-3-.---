@@ -1,5 +1,3 @@
-// FIX: Import Buffer to resolve TypeScript error in Node.js environment.
-import { Buffer } from "buffer";
 import * as functions from "firebase-functions/v2";
 import * as admin from "firebase-admin";
 import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from "@google/genai";
@@ -423,61 +421,5 @@ export const updateUserUsage = functions.https.onCall({
         }
     } else {
         throw new functions.https.HttpsError("invalid-argument", "유효하지 않은 사용량 유형이 지정되었습니다.");
-    }
-});
-
-export const generateHwp = functions.https.onCall({
-    secrets: ["AUTH_SECRET_KEY"],
-    memory: '1GiB', // 파일 변환은 메모리를 사용할 수 있으므로 1GiB로 설정
-}, async (request) => {
-    if (!request.auth) {
-        throw new functions.https.HttpsError("unauthenticated", "이 서비스를 이용하려면 로그인이 필요합니다.");
-    }
-    
-    const { content } = request.data;
-    if (!content || typeof content !== 'string') {
-        throw new functions.https.HttpsError("invalid-argument", "HWP 파일 생성을 위한 콘텐츠가 필요합니다.");
-    }
-
-    const HWP_GENERATOR_URL = "https://hml-generator-service-646620208083.asia-northeast3.run.app/generate";
-    const AUTH_SECRET_KEY = process.env.AUTH_SECRET_KEY;
-
-    if (!AUTH_SECRET_KEY) {
-         console.error("CRITICAL: AUTH_SECRET_KEY secret is not defined.");
-         throw new functions.https.HttpsError("internal", "HWP 생성 서비스가 서버에 올바르게 설정되지 않았습니다.");
-    }
-    
-    try {
-        const response = await fetch(HWP_GENERATOR_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'X-Auth-Token': AUTH_SECRET_KEY,
-            },
-            body: JSON.stringify({
-                content: content,
-                treatAsChar: true,
-                textSize: 12,
-                equationSize: 9,
-            }),
-        });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`HWP generator service error: ${response.status} ${errorText}`);
-            throw new functions.https.HttpsError("internal", `HWP 생성 서버에서 오류가 발생했습니다: ${errorText}`);
-        }
-
-        const buffer = await response.arrayBuffer();
-        const base64Hwp = Buffer.from(buffer).toString('base64');
-
-        return { base64Hwp };
-
-    } catch (error: any) {
-        console.error("Error calling HWP generator service:", error);
-        if (error instanceof functions.https.HttpsError) {
-            throw error;
-        }
-        throw new functions.https.HttpsError("internal", "HWP 파일 생성 중 서버 오류가 발생했습니다.");
     }
 });

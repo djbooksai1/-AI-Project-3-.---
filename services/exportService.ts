@@ -1,5 +1,4 @@
 import { Explanation } from '../types';
-import { getFunctions, httpsCallable } from 'firebase/functions';
 
 declare global {
     interface Window {
@@ -171,33 +170,12 @@ const convertInlineToDisplayMathForHwp = (markdown: string): string => {
     let result = markdown;
     // Convert $...$ to $$...$$, but be careful not to affect existing $$...$$
     // This regex looks for a single $ not preceded or followed by another $
-    result = result.replace(/(?<!\$)\$([^$\n]+?)\)\$(?!\$)/g, '$$$$$1$$$$');
+    result = result.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, '$$$$$1$$$$');
     // Convert \(...\) to $$...$$
     result = result.replace(/\\\(([\s\S]+?)\\\)/g, '$$$$$1$$$$');
     return result;
 };
 
-
-// [+] Firebase Functions v2 asia-northeast3 지역을 명시적으로 설정합니다.
-const functions = getFunctions(undefined, 'asia-northeast3');
-const generateHwp = httpsCallable(functions, 'generateHwp');
-
-const base64ToBlob = (base64: string, contentType: string = '', sliceSize: number = 512): Blob => {
-    const byteCharacters = atob(base64);
-    const byteArrays = [];
-
-    for (let offset = 0; offset < byteCharacters.length; offset += sliceSize) {
-        const slice = byteCharacters.slice(offset, offset + sliceSize);
-        const byteNumbers = new Array(slice.length);
-        for (let i = 0; i < slice.length; i++) {
-            byteNumbers[i] = slice.charCodeAt(i);
-        }
-        const byteArray = new Uint8Array(byteNumbers);
-        byteArrays.push(byteArray);
-    }
-
-    return new Blob(byteArrays, { type: contentType });
-};
 
 export const exportMultipleExplanationsToHwp = async (explanations: Explanation[]): Promise<void> => {
     if (explanations.length === 0) {
@@ -213,16 +191,27 @@ export const exportMultipleExplanationsToHwp = async (explanations: Explanation[
         })
         .join('\n\n\n');
 
+
     try {
-        // Call the secure cloud function instead of fetching directly
-        const result: any = await generateHwp({ content: combinedContent });
-        
-        if (!result.data.base64Hwp) {
-            throw new Error("Cloud function did not return HWP data.");
+        const response = await fetch('https://hml-generator-service-646620208083.asia-northeast3.run.app/generate', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                content: combinedContent,
+                treatAsChar: true,
+                textSize: 12,
+                equationSize: 9,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HWP 생성 서버 오류: ${response.status} ${errorText}`);
         }
-        
-        const blob = base64ToBlob(result.data.base64Hwp, 'application/x-hwp');
-        
+
+        const blob = await response.blob();
         const link = document.createElement('a');
         link.href = URL.createObjectURL(blob);
         const date = new Date();
@@ -234,8 +223,7 @@ export const exportMultipleExplanationsToHwp = async (explanations: Explanation[
         URL.revokeObjectURL(link.href);
 
     } catch (error) {
-        console.error("Error generating HWP file via cloud function:", error);
-        // Re-throw the error to be caught by the UI
+        console.error("Error generating HWP file:", error);
         throw error;
     }
 };
