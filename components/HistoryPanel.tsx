@@ -1,10 +1,10 @@
+
+
 import React, { useState, useEffect } from 'react';
-import { ExplanationSet, UserTier, UsageData, ExplanationMode, ManualFile } from '../types';
+import { ExplanationSet, UserTier, UsageData, ExplanationMode, MonthlyUsageData, CumulativeUsageData } from '../types';
 import { TrashIcon } from './icons/TrashIcon';
 import { XIcon } from './icons/XIcon';
 import { User } from 'firebase/auth';
-import { listUserFiles } from '../services/storageService';
-import { DownloadIcon } from './icons/DownloadIcon';
 
 interface HistoryPanelProps {
     isOpen: boolean;
@@ -16,6 +16,9 @@ interface HistoryPanelProps {
     userTier: UserTier;
     usageData: UsageData;
     tierLimits: UsageData;
+    monthlyHwpUsage: MonthlyUsageData;
+    monthlyHwpLimit: number;
+    cumulativeUsage: CumulativeUsageData;
     isAdmin: boolean;
     onUiAssetUpload: (assetName: 'dropzoneImage', file: File) => Promise<void>;
 }
@@ -33,28 +36,11 @@ const modes: { id: ExplanationMode, label: string }[] = [
     { id: 'quality', label: '전문해설' },
 ];
 
-export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, user, userTier, usageData, tierLimits, isAdmin, onUiAssetUpload }: HistoryPanelProps) {
+export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, user, userTier, usageData, tierLimits, monthlyHwpUsage, monthlyHwpLimit, cumulativeUsage, isAdmin, onUiAssetUpload }: HistoryPanelProps) {
     const tierMessage = (tierDisplayMap[userTier] || tierDisplayMap.basic).message;
-    const [manualFiles, setManualFiles] = useState<ManualFile[]>([]);
-    const [isLoadingFiles, setIsLoadingFiles] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
-
-    useEffect(() => {
-        if (isOpen && user) {
-            const fetchFiles = async () => {
-                setIsLoadingFiles(true);
-                try {
-                    const files = await listUserFiles(user.uid);
-                    setManualFiles(files);
-                } catch (error) {
-                    console.error("Error fetching manual files:", error);
-                } finally {
-                    setIsLoadingFiles(false);
-                }
-            };
-            fetchFiles();
-        }
-    }, [isOpen, user]);
+    
+    const savedSets = sets.filter(set => set.explanationCount > 0);
 
     const formatDate = (timestamp: any) => {
         if (!timestamp?.toDate) return '날짜 정보 없음';
@@ -74,8 +60,6 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
             try {
                 await onUiAssetUpload('dropzoneImage', file);
             } catch (error) {
-                // The error is already displayed by the App component,
-                // so we just need to log it for debugging and ensure the finally block runs.
                 console.error("UI asset upload failed:", error);
             } finally {
                 setIsUploading(false);
@@ -116,28 +100,42 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
                     </div>
                     
                      <div className="p-6 border-b border-primary">
-                        <h3 className="text-lg font-semibold text-text-primary mb-4">오늘 사용량</h3>
-                        <div className="space-y-3 text-sm">
-                            {modes.map(mode => {
-                                const used = usageData[mode.id] || 0;
-                                const limit = tierLimits[mode.id];
-                                const percentage = limit === Infinity || limit === 0 ? 0 : Math.min(100, (used / limit) * 100);
+                        <h3 className="text-lg font-semibold text-text-primary mb-4">사용량</h3>
+                        <div className="text-sm">
+                            <div>
+                                <h4 className="font-semibold text-text-secondary mb-2">오늘 해설 생성 횟수</h4>
+                                {modes.map(mode => {
+                                    const used = usageData[mode.id] || 0;
+                                    const limit = tierLimits[mode.id];
+                                    const percentage = limit === Infinity || limit === 0 ? 0 : Math.min(100, (used / limit) * 100);
+                                    const cumulative = cumulativeUsage[mode.id] || 0;
 
-                                return (
-                                    <div key={mode.id}>
-                                        <div className="flex justify-between mb-1">
-                                            <span className="font-semibold text-text-primary">{mode.label}</span>
-                                            <span className="text-text-secondary">{used} / {limit === Infinity ? '∞' : limit} 문제</span>
+                                    return (
+                                        <div key={mode.id} className="mb-3">
+                                            <div className="flex justify-between mb-1">
+                                                <span className="font-semibold text-text-primary">{mode.label} (누적 {cumulative}회)</span>
+                                                <span className="text-text-secondary">{used} / {limit === Infinity ? '∞' : limit}</span>
+                                            </div>
+                                            <div className="w-full bg-primary rounded-full h-2.5">
+                                                <div className="bg-accent h-2.5 rounded-full" style={{ width: `${percentage}%` }}></div>
+                                            </div>
                                         </div>
-                                        <div className="w-full bg-primary rounded-full h-2.5">
-                                            <div 
-                                                className="bg-accent h-2.5 rounded-full transition-all duration-500" 
-                                                style={{ width: `${percentage}%` }}
-                                            ></div>
-                                        </div>
+                                    )
+                                })}
+                            </div>
+                            <div className="border-t border-primary my-6"></div>
+                             <div>
+                                <h4 className="font-semibold text-text-secondary mb-2">이번 달 HWP 내보내기 (누적 {cumulativeUsage.hwpExports || 0}회)</h4>
+                                 <div className="mb-3">
+                                    <div className="flex justify-between mb-1">
+                                        <span className="font-semibold text-text-primary">사용 횟수</span>
+                                        <span className="text-text-secondary">{monthlyHwpUsage.hwpExports} / {monthlyHwpLimit === Infinity ? '∞' : monthlyHwpLimit}</span>
                                     </div>
-                                )
-                            })}
+                                    <div className="w-full bg-primary rounded-full h-2.5">
+                                        <div className="bg-accent h-2.5 rounded-full" style={{ width: `${monthlyHwpLimit === Infinity || monthlyHwpLimit === 0 ? 0 : Math.min(100, (monthlyHwpUsage.hwpExports / monthlyHwpLimit) * 100)}%` }}></div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
@@ -165,38 +163,15 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
                                 <div className="border-t border-primary my-4"></div>
                             </>
                         )}
-
-                        <div className="mb-4">
-                            <h3 className="text-lg font-semibold text-text-primary mb-3">제작 완료된 한글 파일</h3>
-                            {isLoadingFiles ? (
-                                <p className="text-center text-text-secondary py-4">파일 목록을 불러오는 중...</p>
-                            ) : manualFiles.length > 0 ? (
-                                <div className="space-y-2">
-                                    {manualFiles.map(file => (
-                                        <div key={file.name} className="bg-background p-3 rounded-lg border border-primary flex justify-between items-center">
-                                            <span className="text-sm text-text-primary truncate pr-2">{file.name}</span>
-                                            <a href={file.url} download={file.name} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-1.5 text-xs font-semibold bg-accent text-white rounded-md hover:bg-accent-hover transition-colors">
-                                                <DownloadIcon />
-                                                받기
-                                            </a>
-                                        </div>
-                                    ))}
-                                </div>
-                            ) : (
-                                 <p className="text-center text-text-secondary py-4 text-sm">요청/제작 완료된 파일이 없습니다.</p>
-                            )}
-                        </div>
                         
-                        <div className="border-t border-primary my-4"></div>
-
-                         <h3 className="text-lg font-semibold text-text-primary mb-3">지난해설보기</h3>
+                         <h3 className="text-lg font-semibold text-text-primary mb-3">지난해설(저장한 해설)</h3>
                         <div className="space-y-3">
-                            {sets.length === 0 ? (
+                            {savedSets.length === 0 ? (
                                 <div className="text-center text-text-secondary py-12">
                                     <p>저장된 해설이 없습니다.</p>
                                 </div>
                             ) : (
-                                sets.map(set => (
+                                savedSets.map(set => (
                                     <div key={set.id} className="bg-background p-4 rounded-lg border border-primary transition-colors hover:border-accent group">
                                         <div className="flex justify-between items-start">
                                             <div>

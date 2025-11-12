@@ -104,7 +104,7 @@ export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
                                 id="padding-size"
                                 type="range"
                                 min="8"
-                                max="48"
+                                max="100"
                                 step="1"
                                 value={explanationPadding}
                                 onChange={(e) => setExplanationPadding(Number(e.target.value))}

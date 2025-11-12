@@ -27,6 +27,22 @@
             background-color: var(--color-background);
             color: var(--color-text-primary);
         }
+
+        /* [+] Smooth theme transitions */
+        * {
+            transition: background-color 0.75s ease-in-out, color 0.75s ease-in-out, border-color 0.75s ease-in-out;
+        }
+
+        /* [+] Fix for content overflow in explanation cards */
+        pre {
+            white-space: pre-wrap; /* Allow preformatted text to wrap */
+            word-break: break-word;  /* Break long words or strings */
+        }
+        
+        /* [+] CSS fix for excessive line breaks between consecutive MathJax blocks */
+        p:has(> mjx-container[display="true"]) + p:has(> mjx-container[display="true"]) {
+            margin-top: -0.75em;
+        }
     </style>
     
     <!-- [+] Font Loading Fix: Replaced unstable noonnu links with robust Google Fonts API -->
@@ -86,19 +102,19 @@
             tex: {
                 inlineMath: [['$', '$'], ['\\(', '\\)']],
                 displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                packages: {'[+]': ['ams', 'mathtools']}
             },
             chtml: {
                 displayAlign: 'left',
-                displayIndent: '0em',
-                // [+] 긴 수식이 페이지 레이아웃을 깨뜨리지 않도록 자동 줄바꿈 설정 추가
-                linebreaks: {
-                    automatic: true,
-                    width: 'container' // 컨테이너 너비에 맞춰 줄바꿈
-                }
+                displayIndent: '2em',
             },
             startup: {
-                ready: () => {
-                    window.MathJax.startup.defaultReady();
+                typeset: false,
+                // [+] Explicitly define the ready function to ensure the startup promise resolves.
+                // This fixes a race condition where MathJax might not initialize correctly
+                // in a dynamic React environment, preventing equations from rendering.
+                ready: function () {
+                  MathJax.startup.defaultReady();
                 }
             }
         };
@@ -126,10 +142,9 @@
     "vite": "https://aistudiocdn.com/vite@^7.1.12",
     "@vitejs/plugin-react": "https://aistudiocdn.com/@vitejs/plugin-react@^5.1.0",
     "firebase-admin": "https://aistudiocdn.com/firebase-admin@^13.6.0",
-    "firebase-functions": "https://aistudiocdn.com/firebase-functions@^6.6.0",
-    "firebase-functions/": "https://aistudiocdn.com/firebase-functions@^6.6.0/",
-    "pdfjs-dist/": "https://aistudiocdn.com/pdfjs-dist@^5.4.394/",
-    "canvas": "https://aistudiocdn.com/canvas@^3.2.0"
+    "firebase-functions/": "https://aistudiocdn.com/firebase-functions@^7.0.0/",
+    "path": "https://aistudiocdn.com/path@^0.12.7",
+    "url": "https://aistudiocdn.com/url@^0.11.4"
   }
 }
 </script>

@@ -1,37 +1,48 @@
+
 import React, { useCallback, useState } from 'react';
 
 interface FileDropzoneProps {
     onFileProcess: (files: File[]) => void;
     dropzoneImageUrl: string;
+    disabled: boolean;
+    onDisabledClick: () => void;
 }
 
-export function FileDropzone({ onFileProcess, dropzoneImageUrl }: FileDropzoneProps) {
+export function FileDropzone({ onFileProcess, dropzoneImageUrl, disabled, onDisabledClick }: FileDropzoneProps) {
     const [isDragging, setIsDragging] = useState(false);
     
     const handleFileChange = useCallback((files: FileList | null) => {
+        if (disabled) {
+            onDisabledClick();
+            return;
+        }
         if (files && files.length > 0) {
             onFileProcess(Array.from(files));
         }
-    }, [onFileProcess]);
+    }, [onFileProcess, disabled, onDisabledClick]);
 
-    const handleDragEnter = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const handleDragEnter = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         e.stopPropagation();
+        if (disabled) {
+            onDisabledClick();
+            return;
+        }
         setIsDragging(true);
-    }, []);
+    }, [disabled, onDisabledClick]);
 
-    const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const handleDragLeave = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
     }, []);
     
-    const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const handleDragOver = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         e.stopPropagation();
     }, []);
 
-    const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    const handleDrop = useCallback((e: React.DragEvent<HTMLLabelElement>) => {
         e.preventDefault();
         e.stopPropagation();
         setIsDragging(false);
@@ -46,43 +57,52 @@ export function FileDropzone({ onFileProcess, dropzoneImageUrl }: FileDropzonePr
         }
     };
 
+    const handleClick = (e: React.MouseEvent<HTMLLabelElement>) => {
+        if (disabled) {
+            e.preventDefault(); // Prevent file dialog from opening when disabled
+            onDisabledClick();
+        }
+    };
+
     return (
         <div className="bg-surface p-6 rounded-xl border border-primary">
-            <div
+            <label
                 onDragEnter={handleDragEnter}
                 onDragLeave={handleDragLeave}
                 onDragOver={handleDragOver}
                 onDrop={handleDrop}
+                onClick={handleClick}
                 className={`w-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-300 ${
                     isDragging ? 'border-accent bg-accent/10' : 'border-accent/50'
-                } bg-background hover:border-accent cursor-pointer`}
+                } ${
+                    disabled
+                        ? 'opacity-50 cursor-not-allowed'
+                        : 'bg-background hover:border-accent cursor-pointer'
+                } p-8`}
             >
                 <input
                     type="file"
-                    id="file-upload"
                     className="hidden"
-                    accept=".pdf,image/*"
                     multiple
                     onChange={onFileInputChange}
+                    disabled={disabled}
                 />
-                <label htmlFor="file-upload" className="flex flex-col items-center justify-center text-center p-8 w-full h-full cursor-pointer">
-                    {dropzoneImageUrl && (
-                        <div 
-                            className="w-24 h-24 mb-4 rounded-full bg-cover bg-center border-2 border-primary shadow-lg"
-                            style={{ backgroundImage: `url(${dropzoneImageUrl})` }}
-                        />
-                    )}
-                    <p className="mt-4 text-lg font-semibold text-accent animate-blink">
-                        최고의 해설지가 필요한 문제를 넣어주세요
-                    </p>
-                    <p className="mt-2 text-sm text-text-secondary">
-                        PDF 또는 이미지 파일을 드래그하거나 클릭하여 업로드하세요.
-                    </p>
-                     <p className="mt-1 text-sm text-text-secondary">
-                        또는 스크린샷을 찍어 바로 붙여넣기(Ctrl+V) 하세요.
-                    </p>
-                </label>
-            </div>
+                {dropzoneImageUrl && (
+                    <div 
+                        className="w-24 h-24 mb-4 rounded-full bg-cover bg-center border-2 border-primary shadow-lg"
+                        style={{ backgroundImage: `url(${dropzoneImageUrl})` }}
+                    />
+                )}
+                <p className="mt-4 text-lg font-semibold text-accent animate-blink">
+                    최고의 해설지가 필요한 문제를 넣어주세요
+                </p>
+                <p className="mt-2 text-sm text-text-secondary">
+                    PDF 또는 이미지 파일을 드래그하거나 클릭하여 업로드하세요.
+                </p>
+                 <p className="mt-1 text-sm text-text-secondary">
+                    또는 스크린샷을 찍어 바로 붙여넣기(Ctrl+V) 하세요.
+                </p>
+            </label>
         </div>
     );
 }

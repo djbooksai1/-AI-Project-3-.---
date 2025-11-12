@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
-import ReactMarkdown, { Components } from 'react-markdown';
 import { type Explanation, type QnaData } from '../types';
 import { XIcon } from './icons/XIcon';
 import { Loader } from './Loader';
@@ -9,14 +8,15 @@ import { useTheme } from '../hooks/useTheme';
 import { CheckIcon } from './icons/CheckIcon';
 import { SaveIcon } from './icons/SaveIcon';
 import { GoldIcon } from './icons/GoldIcon';
-import { generateVariationNumbersOnly, generateVariationIdeas, generateVariationFromIdea } from '../services/geminiService';
-import { db } from '../firebaseConfig';
-import { doc, getDoc } from 'firebase/firestore';
 import { RetryIcon } from './icons/RetryIcon';
+import { useVariationGenerator } from '../hooks/useVariationGenerator';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 
 interface ExplanationCardProps {
     explanation: Explanation;
+    index: number;
+    totalCards: number;
     onDelete: (id: number) => void;
     onSave: (id: number) => void;
     onRetry: (id: number) => void;
@@ -30,26 +30,35 @@ interface ExplanationCardProps {
     onOpenQna: (data: QnaData) => void;
     isAdmin: boolean;
     onSaveToCache: (explanation: Explanation) => void;
+    onRetryRecognition: (id: number) => void;
+    isRetryingRecognition: boolean;
 }
 
 const ImageModal: React.FC<{isOpen: boolean; onClose: () => void; imageUrl: string; altText: string}> = ({ isOpen, onClose, imageUrl, altText }) => {
+    const modalRef = useRef<HTMLDivElement>(null);
+
     useEffect(() => {
-        const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape') {
-                onClose();
-            }
-        };
         if (isOpen) {
-            window.addEventListener('keydown', handleKeyDown);
+            modalRef.current?.focus();
         }
-        return () => {
-            window.removeEventListener('keydown', handleKeyDown);
-        };
-    }, [isOpen, onClose]);
+    }, [isOpen]);
+
+    const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+        if (event.key === 'Escape') {
+            event.stopPropagation(); 
+            onClose();
+        }
+    };
 
     if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 cursor-zoom-out" onClick={onClose}>
+        <div 
+            ref={modalRef}
+            tabIndex={-1} 
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4 cursor-zoom-out outline-none" 
+            onClick={onClose}
+            onKeyDown={handleKeyDown}
+        >
             <div className="relative max-w-full max-h-full" onClick={(e) => e.stopPropagation()}>
                 <img src={imageUrl} alt={altText} className="block max-w-[95vw] max-h-[95vh] object-contain rounded-md" />
                 <button onClick={onClose} className="absolute -top-3 -right-3 bg-surface text-text-primary rounded-full h-8 w-8 flex items-center justify-center text-xl font-bold hover:bg-danger" aria-label="Close image viewer">&times;</button>
@@ -71,188 +80,102 @@ const DifficultyStars: React.FC<{ level?: number }> = ({ level }) => {
     );
 };
 
-export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, onDelete, onSave, onRetry, isSaving, isRetrying, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, isAdmin, onSaveToCache }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
+export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, index, totalCards, onDelete, onSave, onRetry, isSaving, isRetrying, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, isAdmin, onSaveToCache, onRetryRecognition, isRetryingRecognition }) => {
+    const [isExpanded, setIsExpanded] = useState(index === 0);
     const renderedContentRef = useRef<HTMLDivElement>(null);
-    const recognizedTextRef = useRef<HTMLDivElement>(null);
-    const variationContentRef = useRef<HTMLDivElement>(null);
-    const { explanationFontSize, explanationMathSize, explanationTextFont, explanationPadding } = useTheme();
+    const { explanationFontSize, explanationMathSize, explanationTextFont, explanationPadding, theme } = useTheme();
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
-    type VariationState = 'idle' | 'numbers_loading' | 'ideas_loading' | 'ideas_shown' | 'problem_loading';
-    const [variationState, setVariationState] = useState<VariationState>('idle');
-    const [variationIdeas, setVariationIdeas] = useState<string[]>([]);
-    const [generatedVariation, setGeneratedVariation] = useState<Explanation['variationProblem'] | null>(explanation.variationProblem || null);
-    const [variationError, setVariationError] = useState<string | null>(null);
-
-    const handleGenerateNumbersVariation = useCallback(async () => {
-        setVariationState('numbers_loading');
-        setVariationError(null);
-        try {
-            const guidelinesDoc = await getDoc(doc(db, 'settings', 'guidelines'));
-            const guidelines = guidelinesDoc.exists() ? guidelinesDoc.data().content : '';
-            const result = await generateVariationNumbersOnly(explanation.originalProblemText, guidelines);
-            setGeneratedVariation(result);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '숫자 변형 문제 생성에 실패했습니다.';
-            setVariationError(message);
-        } finally {
-            setVariationState('idle');
-        }
-    }, [explanation.originalProblemText]);
-
-    const handleFetchIdeas = useCallback(async () => {
-        setVariationState('ideas_loading');
-        setVariationError(null);
-        try {
-            const guidelinesDoc = await getDoc(doc(db, 'settings', 'guidelines'));
-            const guidelines = guidelinesDoc.exists() ? guidelinesDoc.data().content : '';
-            const ideas = await generateVariationIdeas(explanation.originalProblemText, guidelines);
-            setVariationIdeas(ideas);
-            setVariationState('ideas_shown');
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '아이디어 생성에 실패했습니다.';
-            setVariationError(message);
-            setVariationState('idle');
-        }
-    }, [explanation.originalProblemText]);
-
-    const handleGenerateFromIdea = useCallback(async (idea: string) => {
-        setVariationState('problem_loading');
-        setVariationError(null);
-        setVariationIdeas([]);
-        try {
-            const guidelinesDoc = await getDoc(doc(db, 'settings', 'guidelines'));
-            const guidelines = guidelinesDoc.exists() ? guidelinesDoc.data().content : '';
-            const result = await generateVariationFromIdea(explanation.originalProblemText, idea, guidelines);
-            setGeneratedVariation(result);
-        } catch (error) {
-            const message = error instanceof Error ? error.message : '문제 생성에 실패했습니다.';
-            setVariationError(message);
-        } finally {
-            setVariationState('idle');
-        }
-    }, [explanation.originalProblemText]);
-
-    const handleResetVariation = useCallback(() => {
-        setGeneratedVariation(null);
-        setVariationState('idle');
-        setVariationIdeas([]);
-        setVariationError(null);
-    }, []);
+    const {
+        variationState,
+        variationIdeas,
+        generatedVariation,
+        variationError,
+        handleGenerateNumbersVariation,
+        handleFetchIdeas,
+        handleGenerateFromIdea,
+        handleResetVariation,
+    } = useVariationGenerator(explanation.originalProblemText, explanation.variationProblem);
+    
+    const accentColor = theme.colors.accent;
 
     useLayoutEffect(() => {
         setRenderedContentRef(renderedContentRef.current);
         return () => setRenderedContentRef(null);
-    }, [setRenderedContentRef]);
+    }, [setRenderedContentRef, isExpanded]);
+    
+    const choicesMarkdown = useMemo(() => {
+        // Replace all newline characters with spaces to force horizontal layout
+        return explanation.choices?.replace(/\\n|\n/g, '  ') || '';
+    }, [explanation.choices]);
 
-    useEffect(() => {
-        const processContent = async (element: HTMLElement | null) => {
-            if (!element) return;
-    
-            // Best practice: Clear previous typesetting before re-running to avoid conflicts.
-            if (window.MathJax?.typesetClear) {
-                window.MathJax.typesetClear([element]);
+    const markdownStyle = useMemo(() => ({
+        fontSize: `${explanationFontSize}px`,
+        fontFamily: explanationTextFont.family,
+    }), [explanationFontSize, explanationTextFont]);
+
+    const explanationStyle = useMemo(() => ({
+        fontSize: `${explanationFontSize}px`,
+        fontFamily: explanationTextFont.family,
+        padding: `${explanationPadding}px`,
+    }), [explanationFontSize, explanationTextFont, explanationPadding]);
+
+    const handleExplanationClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+        let target = event.target as HTMLElement;
+
+        // Traverse up to find a meaningful block element (p, li, etc.)
+        const blockElements = ['P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'BLOCKQUOTE', 'PRE'];
+        while (target && target !== event.currentTarget) {
+            if (blockElements.includes(target.tagName)) {
+                break;
             }
-    
-            // Highlight code blocks with Prism.js
-            if (window.Prism) {
-                window.Prism.highlightAllUnder(element);
-            }
-    
-            // Typeset mathematical equations with MathJax.
-            if (window.MathJax?.typesetPromise) {
-                await window.MathJax.typesetPromise([element]).catch(err => console.error("MathJax typeset error:", err));
-            }
-        };
-    
-        if (isExpanded) {
-            processContent(renderedContentRef.current);
-            processContent(recognizedTextRef.current);
+            target = target.parentElement as HTMLElement;
         }
-        if (generatedVariation) {
-            processContent(variationContentRef.current);
-        }
-    }, [explanation.markdown, explanation.problemBody, explanation.choices, generatedVariation, isExpanded]);
-    
 
-    const handleTextClick = useCallback((event: React.MouseEvent<HTMLElement>, rawMarkdownFragment: string) => {
-        if (isSelectionMode) return;
-        event.stopPropagation();
-        
-        onOpenQna({
-            cardId: explanation.id,
-            problemText: explanation.originalProblemText,
-            fullExplanation: explanation.markdown,
-            selectedLine: rawMarkdownFragment, // Raw markdown for AI
-            selectedLineHtml: rawMarkdownFragment, // Raw markdown for MathJaxRenderer to render
-        });
-    }, [onOpenQna, explanation, isSelectionMode]);
+        // If we found a block element and it's not the container itself
+        if (target && target !== event.currentTarget) {
+            const selectedLine = target.textContent || '';
+            const selectedLineHtml = target.innerHTML;
 
-    const renderMarkdownForExplanation = useMemo((): Components => {
-        const getRawMarkdownFromNode = (node: any): string => {
-            if (node?.position?.start?.offset !== undefined && node?.position?.end?.offset !== undefined) {
-                return explanation.markdown.slice(node.position.start.offset, node.position.end.offset);
-            }
-            return '';
-        };
-
-        const SentenceWrapper: React.FC<React.PropsWithChildren<{ rawMarkdown: string }>> = ({ children, rawMarkdown }) => {
-            const interactiveClass = "cursor-pointer transition-colors duration-200 hover:bg-primary/30 rounded";
-            
-            const processChildren = (nodes: React.ReactNode): React.ReactNode => {
-                 return React.Children.map(nodes, (child) => {
-                    if (typeof child === 'string') {
-                        const mathRegex = /(\$\$[\s\S]*?\$\$|\$[\s\S]*?\$|\\\[[\s\S]*?\\\]|\\\(.*?\\\))/g;
-                        const parts = child.split(mathRegex);
-                        return parts.map((part, pIndex) => {
-                            if (!part) return null;
-                            if (pIndex % 2 === 1) return <React.Fragment key={`math-${pIndex}`}>{part}</React.Fragment>;
-                            if (!part.trim()) return <React.Fragment key={`text-${pIndex}`}>{part}</React.Fragment>;
-                            return <span key={`text-${pIndex}`} onClick={(e) => handleTextClick(e, rawMarkdown)} className={interactiveClass}>{part}</span>;
-                        });
-                    }
-                    if (React.isValidElement(child) && child.type !== 'code' && (child.props as any)?.node?.tagName !== 'code') {
-                        return React.cloneElement(child as React.ReactElement<any>, { children: processChildren((child.props as any).children) });
-                    }
-                    return child;
+            if (selectedLine.trim()) {
+                onOpenQna({
+                    cardId: explanation.id,
+                    problemText: explanation.originalProblemText,
+                    fullExplanation: explanation.markdown,
+                    selectedLine,
+                    selectedLineHtml,
                 });
-            };
-            return <>{processChildren(children)}</>;
-        };
-
-        return {
-            p: (props) => <p {...props} className="my-2"><SentenceWrapper rawMarkdown={getRawMarkdownFromNode(props.node)}>{props.children}</SentenceWrapper></p>,
-            h2: (props) => <h2 {...props} className="text-lg font-bold my-2"><SentenceWrapper rawMarkdown={getRawMarkdownFromNode(props.node)}>{props.children}</SentenceWrapper></h2>,
-            li: (props) => <li {...props}><SentenceWrapper rawMarkdown={getRawMarkdownFromNode(props.node)}>{props.children}</SentenceWrapper></li>,
-            code: ({ className, children, ...props }) => /language-(\w+)/.exec(className || '') ? <code className={className} {...props}>{children}</code> : <code className="bg-primary/30 text-accent font-semibold px-1 py-0.5 rounded text-sm" {...props}>{children}</code>,
-        };
-    }, [handleTextClick, explanation.markdown]);
-
-
+            }
+        }
+    }, [explanation, onOpenQna]);
+    
     return (
-        <div id={id} className={`bg-surface rounded-lg shadow-md border transition-all duration-300 ${isSelectionMode && isSelected ? 'border-accent ring-2 ring-accent' : explanation.isGolden ? 'border-gold' : 'border-primary'}`}>
+        <div id={id} className={`bg-surface rounded-lg shadow-md border transition-all duration-300 overflow-hidden ${isSelectionMode && isSelected ? 'border-accent ring-2 ring-accent' : explanation.isGolden ? 'border-gold' : 'border-primary'}`}>
             <ImageModal isOpen={isImageModalOpen} onClose={() => setIsImageModalOpen(false)} imageUrl={explanation.problemImage} altText={`Problem ${explanation.problemNumber}`} />
-            <div className="flex items-center justify-between p-3 border-b border-primary">
+            <div 
+                className="flex items-center justify-between p-3 border-b border-primary cursor-pointer"
+                onClick={(e) => {
+                    if ((e.target as HTMLElement).closest('button')) return;
+                    setIsExpanded(!isExpanded)}
+                }
+            >
                 <div className="flex items-center gap-3">
-                    {isSelectionMode && <input type="checkbox" checked={isSelected} onChange={() => onSelect(explanation.id)} className="h-5 w-5 rounded border-primary bg-background text-accent focus:ring-accent cursor-pointer" />}
+                    {isSelectionMode && <input type="checkbox" checked={isSelected} onChange={() => onSelect(explanation.id)} onClick={e => e.stopPropagation()} className="h-5 w-5 rounded border-primary bg-background text-accent focus:ring-accent cursor-pointer" />}
                     <span className="text-lg font-bold text-accent">문제 {explanation.problemNumber}</span>
                     <span className="text-sm text-text-secondary">(출처: {explanation.pageNumber}p)</span>
                     {explanation.isGolden && <div title="해적 캐시 인증됨"><GoldIcon /></div>}
                 </div>
                 <div className="flex items-center gap-2">
-                    {isAdmin && !explanation.isGolden && <button onClick={() => onSaveToCache(explanation)} className="p-2 rounded-full text-text-secondary hover:bg-gold hover:text-black" title="캐시에 저장"><GoldIcon /></button>}
-                    <button onClick={() => onRetry(explanation.id)} disabled={explanation.isLoading || isRetrying} className="p-2 rounded-full text-danger hover:bg-danger hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" title="다시쓰기"><RetryIcon /></button>
-                    {!explanation.docId ? <button onClick={() => onSave(explanation.id)} disabled={isSaving} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50" title="저장">{isSaving ? <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <SaveIcon />}</button> : <div className="p-2 text-success" title="저장됨"><CheckIcon /></div>}
-                    <button onClick={() => onDelete(explanation.id)} className="p-2 rounded-full text-text-secondary hover:bg-danger hover:text-white" title="삭제"><XIcon /></button>
-                    <button onClick={() => setIsExpanded(!isExpanded)} className="p-2 rounded-full text-text-secondary hover:bg-primary" title={isExpanded ? "접기" : "펼치기"}>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</button>
+                    {isAdmin && !explanation.isGolden && <button onClick={(e) => { e.stopPropagation(); onSaveToCache(explanation); }} className="p-2 rounded-full text-text-secondary hover:bg-gold hover:text-black" title="캐시에 저장"><GoldIcon /></button>}
+                    {!explanation.docId ? <button onClick={(e) => { e.stopPropagation(); onSave(explanation.id); }} disabled={isSaving} className="p-2 rounded-full text-text-secondary hover:bg-accent hover:text-white disabled:opacity-50" title="저장">{isSaving ? <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> : <SaveIcon />}</button> : <div className="p-2 text-success" title="저장됨"><CheckIcon /></div>}
+                    <button onClick={(e) => { e.stopPropagation(); onDelete(explanation.id); }} className="p-2 rounded-full text-text-secondary hover:bg-danger hover:text-white" title="삭제"><XIcon /></button>
+                    <button onClick={(e) => { e.stopPropagation(); setIsExpanded(!isExpanded); }} className="p-2 rounded-full text-text-secondary hover:bg-primary" title={isExpanded ? "접기" : "펼치기"}>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</button>
                 </div>
             </div>
             {isExpanded && (
-                <>
+                <div className="relative">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4">
-                        {/* Problem Image Part */}
-                        <div className="flex flex-col">
+                        <div className="flex flex-col overflow-hidden">
                             <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">인식된 페이지</h4>
                             <div className="flex-grow flex items-center justify-center p-2 bg-background rounded-md border border-primary/30 min-h-[150px] overflow-hidden">
                                 <img 
@@ -263,40 +186,59 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                                 />
                             </div>
                         </div>
-                        {/* Recognized Text Part */}
-                        <div className="flex flex-col">
-                            <h4 className="text-sm font-semibold text-text-secondary mb-2 text-center">해적이 인식한 문제</h4>
-                            <div 
-                                ref={recognizedTextRef} 
-                                className="recognized-text-content max-w-none text-text-primary bg-background p-3 rounded-md border border-primary/30 flex-grow overflow-y-auto max-h-60 min-h-[150px]"
-                                style={{ fontSize: `${explanationFontSize}px`, fontFamily: explanationTextFont.family } as React.CSSProperties}
-                            >
-                                <style>{`.recognized-text-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
-                                <ReactMarkdown>{explanation.problemBody || "텍스트를 인식하지 못했습니다."}</ReactMarkdown>
-                                {explanation.problemType === '객관식' && explanation.choices && (
-                                    <div className="bg-background p-3 rounded-md border border-primary/50 mt-4">
-                                        <ReactMarkdown>{explanation.choices}</ReactMarkdown>
-                                    </div>
-                                )}
+                        <div className="flex flex-col overflow-hidden">
+                            <div className="flex items-center justify-center gap-2 mb-2">
+                                <h4 className="text-sm font-semibold text-text-secondary">해적이 인식한 문제</h4>
+                                <button 
+                                    onClick={() => onRetryRecognition(explanation.id)} 
+                                    disabled={isRetryingRecognition}
+                                    className="p-1 rounded-full text-danger hover:bg-danger hover:text-white disabled:opacity-50 disabled:cursor-not-allowed" 
+                                    title="문제 다시 인식하기"
+                                >
+                                    {isRetryingRecognition ? (
+                                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle opacity="0.25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path opacity="0.75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                                    ) : (
+                                        <RetryIcon />
+                                    )}
+                                </button>
+                            </div>
+                            <style>{`.recognized-text-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
+                            <div className="recognized-text-content max-w-none text-text-primary bg-background p-3 rounded-md border border-primary/30 flex-grow overflow-auto max-h-60 min-h-[150px]">
+                                <MarkdownRenderer
+                                    markdown={explanation.problemBody}
+                                    style={markdownStyle as React.CSSProperties}
+                                />
+                                <MarkdownRenderer
+                                    markdown={choicesMarkdown}
+                                    style={markdownStyle as React.CSSProperties}
+                                />
                             </div>
                         </div>
                     </div>
-                    {/* Explanation Part */}
                     <div className="flex flex-col">
                         <div className="flex-grow">
-                            <div className="flex items-center flex-wrap gap-x-4 gap-y-1 p-3 border-y border-primary/50">
-                                {explanation.difficulty && <DifficultyStars level={explanation.difficulty} />}
-                                {explanation.coreConcepts && explanation.coreConcepts.length > 0 && (
-                                    <div className="flex flex-wrap items-center gap-2">
-                                        {explanation.coreConcepts.map((concept, i) => <span key={i} className="px-2 py-1 text-xs font-semibold bg-primary/50 text-text-secondary rounded-full">{concept}</span>)}
-                                    </div>
-                                )}
+                            <div className="flex items-center justify-between flex-wrap gap-x-4 gap-y-1 p-3 border-y border-primary/50">
+                                <div className="flex items-center flex-wrap gap-x-4 gap-y-1">
+                                    {explanation.difficulty && <DifficultyStars level={explanation.difficulty} />}
+                                    {explanation.coreConcepts && explanation.coreConcepts.length > 0 && (
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {explanation.coreConcepts.map((concept, i) => <span key={i} className={`px-2 py-1 text-xs font-semibold bg-primary/50 text-text-secondary rounded-full`}>{concept}</span>)}
+                                        </div>
+                                    )}
+                                </div>
+                                <button onClick={() => onRetry(explanation.id)} disabled={explanation.isLoading || isRetrying} className="p-2 rounded-full text-danger hover:bg-danger hover:text-white disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0" title="다시쓰기"><RetryIcon /></button>
                             </div>
                             {explanation.isLoading ? <div className="p-6 h-full flex items-center justify-center"><Loader status={explanation.markdown} /></div> : explanation.isError ? <div className="p-6 text-center text-danger"><p>{explanation.markdown}</p></div> : (
-                                <div ref={renderedContentRef} className="explanation-content prose prose-sm max-w-none text-text-primary" style={{ fontSize: `${explanationFontSize}px`, '--tw-prose-body': 'var(--color-text-primary)', fontFamily: explanationTextFont.family, padding: `${explanationPadding}px` } as React.CSSProperties}>
+                                <>
                                     <style>{`.explanation-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
-                                    <ReactMarkdown components={renderMarkdownForExplanation}>{explanation.markdown}</ReactMarkdown>
-                                </div>
+                                    <div ref={renderedContentRef} onClick={handleExplanationClick} className="cursor-help">
+                                        <MarkdownRenderer
+                                            markdown={explanation.markdown}
+                                            className="explanation-content text-text-primary overflow-x-auto break-words"
+                                            style={explanationStyle as React.CSSProperties}
+                                        />
+                                    </div>
+                                </>
                             )}
                         </div>
                         <div className="border-t border-primary/50 mt-auto">
@@ -305,10 +247,10 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                                     <h4 className="font-bold text-accent text-sm">변형 문제</h4>
                                     <div className="flex items-center gap-2">
                                         {variationState === 'idle' && (
-                                            <button onClick={handleFetchIdeas} className="px-2 py-1 text-xs font-semibold bg-primary/50 rounded-md hover:bg-accent hover:text-white transition-colors">새 아이디어로 만들기</button>
+                                            <button onClick={handleFetchIdeas} className="text-xs font-semibold" style={{color: accentColor}}>새 아이디어로 만들기</button>
                                         )}
                                         {generatedVariation && variationState === 'idle' && (
-                                             <button onClick={handleResetVariation} className="px-2 py-1 text-xs font-semibold bg-primary/50 rounded-md hover:bg-primary transition-colors">다른 변형 만들기</button>
+                                                <button onClick={handleResetVariation} className="text-xs font-semibold" style={{color: accentColor}}>다른 변형 만들기</button>
                                         )}
                                         {variationState === 'ideas_shown' && (
                                             <button onClick={handleResetVariation} className="px-2 py-1 text-xs font-semibold bg-danger/50 text-danger rounded-md hover:bg-danger/70 transition-colors">취소</button>
@@ -340,26 +282,31 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, o
                                     <div className="text-center py-2">
                                         <button 
                                             onClick={handleGenerateNumbersVariation}
-                                            className="px-3 py-1.5 text-sm font-semibold bg-accent/80 text-white rounded-md hover:bg-accent transition-colors"
+                                            style={{backgroundColor: theme.colors['accent-hover'], color: theme.colors.surface}}
+                                            className="px-3 py-1.5 text-sm font-semibold rounded-md hover:animate-pulse-red-border"
                                         >
                                             변형 문제 만들기
                                         </button>
                                     </div>
                                 )}
                                 
-                                {variationState === 'idle' && generatedVariation && (
-                                    <div ref={variationContentRef} className="space-y-2 text-sm">
-                                        <div className="prose prose-sm max-w-none text-text-primary"><ReactMarkdown>{generatedVariation.problem}</ReactMarkdown></div>
-                                        <details className="text-xs">
-                                            <summary className="cursor-pointer text-text-secondary hover:text-text-primary">변형 문제 해설 보기</summary>
-                                            <div className="mt-2 p-2 border-t border-primary/30 prose prose-sm max-w-none text-text-primary"><ReactMarkdown>{generatedVariation.explanation}</ReactMarkdown></div>
-                                        </details>
-                                    </div>
-                                )}
+                                <div className="text-sm">
+                                    {variationState === 'idle' && generatedVariation && (
+                                        <div className="space-y-2">
+                                            <MarkdownRenderer markdown={generatedVariation.problem} className="prose prose-sm max-w-none text-text-primary overflow-x-auto" />
+                                            <details className="text-xs">
+                                                <summary className="cursor-pointer text-text-secondary hover:text-text-primary">변형 문제 해설 보기</summary>
+                                                <div className="mt-2 p-2 border-t border-primary/30">
+                                                     <MarkdownRenderer markdown={generatedVariation.explanation} className="prose prose-sm max-w-none text-text-primary overflow-x-auto" />
+                                                </div>
+                                            </details>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
-                </>
+                </div>
             )}
         </div>
     );

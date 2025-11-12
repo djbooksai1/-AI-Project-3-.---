@@ -1,13 +1,10 @@
-
-
 import React, { useState, useEffect, useRef } from 'react';
 import { QnaData } from '../types';
 import { askCaptainAboutLine } from '../services/geminiService';
 import { Loader } from './Loader';
-import ReactMarkdown from 'react-markdown';
 import { XIcon } from './icons/XIcon';
-import { MathJaxRenderer } from './MathJaxRenderer';
 import { useTheme } from '../hooks/useTheme';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface QnaPanelProps {
     data: QnaData | null;
@@ -19,7 +16,6 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
     const [answer, setAnswer] = useState<string | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const answerRef = useRef<HTMLDivElement>(null);
     const { explanationFontSize, explanationMathSize, explanationTextFont } = useTheme();
     
     useEffect(() => {
@@ -46,25 +42,11 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
             );
             setAnswer(result);
         } catch (e) {
-            setError(e instanceof Error ? e.message : 'An error occurred.');
+            setError(e instanceof Error ? e.message : '오류가 발생했습니다.');
         } finally {
             setIsLoading(false);
         }
     };
-
-    useEffect(() => {
-        const processContent = async (element: HTMLElement | null) => {
-            if (!element) return;
-            if (window.Prism) window.Prism.highlightAllUnder(element);
-            if (window.MathJax?.typesetPromise) {
-                await window.MathJax.typesetPromise([element]).catch(err => console.error("MathJax typeset error:", err));
-            }
-        };
-
-        if (answer) {
-            processContent(answerRef.current);
-        }
-    }, [answer]);
 
     return (
         <div className="bg-surface rounded-lg shadow-xl w-full border border-primary flex flex-col max-h-[80vh]">
@@ -87,9 +69,10 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
                                 style={{ fontSize: `${explanationFontSize}px`, fontFamily: explanationTextFont.family }}
                             >
                                 <style>{`.qna-panel-content .MathJax { font-size: ${explanationMathSize}% !important; }`}</style>
-                                <div className="qna-panel-content">
-                                    <MathJaxRenderer text={data.selectedLineHtml} />
-                                </div>
+                                <div
+                                    className="qna-panel-content"
+                                    dangerouslySetInnerHTML={{ __html: data.selectedLineHtml }}
+                                />
                             </div>
                         </div>
 
@@ -106,9 +89,10 @@ export const QnaPanel: React.FC<QnaPanelProps> = ({ data, onClose }) => {
                         {answer && (
                             <div className="p-4 bg-background border border-success/50 rounded-md">
                                 <p className="text-sm font-semibold text-success">선장의 답변:</p>
-                                <div className="prose prose-sm max-w-none text-text-primary mt-2" ref={answerRef}>
-                                     <ReactMarkdown>{answer}</ReactMarkdown>
-                                </div>
+                                <MarkdownRenderer 
+                                    markdown={answer}
+                                    className="prose prose-sm max-w-none text-text-primary mt-2"
+                                />
                             </div>
                         )}
                     </div>

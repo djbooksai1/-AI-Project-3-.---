@@ -1,5 +1,3 @@
-
-
 import React, { createContext, useState, useEffect, useMemo, useCallback } from 'react';
 import { themes as availableThemes, Theme } from '../config/themes';
 import { textFonts as availableTextFonts, Font } from '../config/fonts';
@@ -10,7 +8,7 @@ import { onAuthStateChanged, User } from 'firebase/auth';
 
 interface ThemeContextType {
     theme: Theme;
-    setTheme: (theme: Theme) => void;
+    setTheme: React.Dispatch<React.SetStateAction<Theme>>;
     themes: Theme[];
     explanationFontSize: number;
     setExplanationFontSize: (size: number) => void;
@@ -32,7 +30,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
     // State for explanation-specific typography and styling
     const [explanationFontSize, setExplanationFontSizeState] = useState<number>(14.5);
     const [explanationMathSize, setExplanationMathSizeState] = useState<number>(105);
-    const [explanationPadding, setExplanationPaddingState] = useState<number>(24);
+    const [explanationPadding, setExplanationPaddingState] = useState<number>(80);
     const [explanationTextFont, setExplanationTextFontState] = useState<Font>(availableTextFonts[1]); // Default to Batang
     const [currentUser, setCurrentUser] = useState<User | null>(null);
 
@@ -62,7 +60,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
                                 if (settings.explanationTextFontName) {
                                     const foundFont = availableTextFonts.find(f => f.name === settings.explanationTextFontName);
                                     if (foundFont) setExplanationTextFontState(foundFont);
-                                }
+                                 }
                             }
                         } else {
                             console.log("No user document for theme settings found, using defaults.");
@@ -77,7 +75,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
                 setThemeState(availableThemes[5]); // Paper
                 setExplanationFontSizeState(14.5);
                 setExplanationMathSizeState(105);
-                setExplanationPaddingState(24);
+                setExplanationPaddingState(80);
                 setExplanationTextFontState(availableTextFonts[1]); // Batang
             }
         });
@@ -108,13 +106,9 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             console.log("Theme settings saved to Firestore.");
         } catch (error) {
             console.error("Error saving theme settings to Firestore: ", error);
-            let errorMessage = "테마 설정을 저장하는 데 실패했습니다.";
-            if (error instanceof Error) {
-                errorMessage += "\n\n" + error.message;
-            } else {
-                // FIX: In a `catch` block, `error` is of type `unknown`. Explicitly convert it to a string before concatenation.
-                errorMessage += "\n\n" + String(error);
-            }
+            // FIX: The 'error' object in a catch block is of type 'unknown' and cannot be used directly. It must be type-checked before use.
+            const errorDetails = error instanceof Error ? error.message : String(error);
+            const errorMessage = `테마 설정을 저장하는 데 실패했습니다.\n\n${errorDetails}`;
             alert(errorMessage);
         }
     }, [theme, explanationFontSize, explanationMathSize, explanationPadding, explanationTextFont, currentUser]);
@@ -131,7 +125,7 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
 
     // Set default UI font globally
     useEffect(() => {
-        document.documentElement.style.setProperty('--font-family-text', "'KoPubWorldDotum', sans-serif");
+        document.documentElement.style.setProperty('--font-family-text', "'Spoqa Han Sans Neo', sans-serif");
     }, []);
 
     const value = useMemo(() => ({

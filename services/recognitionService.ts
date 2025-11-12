@@ -1,16 +1,12 @@
+
 import { ExtractedProblem } from '../types';
 
-// Declare the global cv object for TypeScript
 declare const cv: any;
 
 class RecognitionService {
     private isReady = false;
     private readyPromise: Promise<void> | null = null;
 
-    /**
-     * Initializes the service by waiting for the OpenCV.js script to load.
-     * This should be called once when the application initializes.
-     */
     init(): Promise<void> {
         if (this.isReady) {
             return Promise.resolve();
@@ -34,7 +30,6 @@ class RecognitionService {
                         resolve();
                     };
                 } else {
-                     // Fallback for some environments or script loading scenarios
                     setTimeout(() => {
                          if (typeof cv !== 'undefined' && cv.Mat) {
                              console.log("OpenCV.js is ready (fallback).");
@@ -62,10 +57,6 @@ class RecognitionService {
         return this.readyPromise;
     }
 
-    /**
-     * Detects text blocks in an image using an advanced computer vision pipeline.
-     * This acts as the 'AI Field Commander' to pre-process data for the main AI.
-     */
     async detectProblems(imageBase64: string): Promise<ExtractedProblem[]> {
         if (!this.isReady) {
             throw new Error("Recognition service (OpenCV.js) is not initialized yet.");
@@ -79,7 +70,6 @@ class RecognitionService {
         const thresh = new cv.Mat();
         cv.adaptiveThreshold(gray, thresh, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C, cv.THRESH_BINARY_INV, 11, 2);
 
-        // --- Step 1: Initial Contour Detection (Find all potential text fragments) ---
         const contours = new cv.MatVector();
         const hierarchy = new cv.Mat();
         cv.findContours(thresh, contours, hierarchy, cv.RETR_TREE, cv.CHAIN_APPROX_SIMPLE);
@@ -91,13 +81,11 @@ class RecognitionService {
         contours.delete();
         hierarchy.delete();
         
-        // --- Step 2: Intelligent Filtering & Strategic Merging ---
         const imageWidth = src.cols;
         const imageHeight = src.rows;
 
-        // Filter out noise (very small contours) and lines (extreme aspect ratios)
-        const minArea = 20; // Absolute pixel area
-        const maxLineAspect = 15.0; // width/height or height/width
+        const minArea = 20; 
+        const maxLineAspect = 15.0; 
         let filteredRects = initialRects.filter(rect => {
             const area = rect.width * rect.height;
             const aspectRatio = rect.width / rect.height;
@@ -106,13 +94,12 @@ class RecognitionService {
                    (1/aspectRatio) < maxLineAspect;
         });
 
-        // Strategically merge nearby rectangles into meaningful text blocks
         const mergedRects = this.mergeNearbyRects(filteredRects, imageWidth * 0.03);
 
         const problems: ExtractedProblem[] = mergedRects.map(rect => {
             return {
-                type: '주관식', // Default type
-                lines: [],
+                problemBody: '', 
+                problemType: '주관식', 
                 bbox: {
                     x_min: rect.x / imageWidth,
                     y_min: rect.y / imageHeight,
@@ -122,7 +109,6 @@ class RecognitionService {
             };
         });
 
-        // Clean up OpenCV memory
         src.delete();
         gray.delete();
         thresh.delete();
@@ -130,12 +116,6 @@ class RecognitionService {
         return problems.sort((a, b) => a.bbox.y_min - b.bbox.y_min);
     }
     
-    /**
-     * Merges nearby rectangles into larger blocks. This is the core of the 'Field Commander' logic.
-     * @param rects - An array of initial bounding rectangles.
-     * @param gapThreshold - The maximum pixel gap to consider for merging.
-     * @returns A new array of merged rectangles.
-     */
     private mergeNearbyRects(rects: any[], gapThreshold: number): any[] {
         if (rects.length < 2) return rects;
 
@@ -157,11 +137,9 @@ class RecognitionService {
 
                     const otherRect = merged[j];
 
-                    // Calculate distance between the closest edges of two rects
                     const horizontalDist = Math.max(0, Math.max(currentRect.x, otherRect.x) - Math.min(currentRect.x + currentRect.width, otherRect.x + otherRect.width));
                     const verticalDist = Math.max(0, Math.max(currentRect.y, otherRect.y) - Math.min(currentRect.y + currentRect.height, otherRect.y + otherRect.height));
                     
-                    // Merge if they are close enough horizontally OR vertically
                     if (horizontalDist < gapThreshold && verticalDist < gapThreshold) {
                          const unionX = Math.min(currentRect.x, otherRect.x);
                          const unionY = Math.min(currentRect.y, otherRect.y);
@@ -181,9 +159,6 @@ class RecognitionService {
         return merged;
     }
 
-    /**
-     * Creates an HTMLImageElement from a base64 string.
-     */
     private createImageElement(base64String: string): Promise<HTMLImageElement> {
         return new Promise((resolve, reject) => {
             const img = new Image();

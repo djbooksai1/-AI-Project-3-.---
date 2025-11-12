@@ -1,4 +1,5 @@
 
+
 export interface Explanation {
     id: number;
     docId?: string; // Firestore document ID, will be set after first save
@@ -12,6 +13,7 @@ export interface Explanation {
     problemBody: string; // The question part
     problemType?: '객관식' | '주관식';
     choices?: string;
+    bbox: Bbox;
 
 
     // "Dynamic AI Tutor" features
@@ -33,6 +35,17 @@ export interface UsageData {
     fast: number;
     dajeong: number;
     quality: number;
+}
+
+export interface MonthlyUsageData {
+    hwpExports: number;
+}
+
+export interface CumulativeUsageData {
+    fast: number;
+    dajeong: number;
+    quality: number;
+    hwpExports: number;
 }
 
 export type UserTier = 'basic' | 'standard' | 'premium' | 'pro';
@@ -77,10 +90,18 @@ export interface HwpRequest {
 
 // FIX: Define and export the ExtractedProblem interface for reuse.
 export interface ExtractedProblem {
-    type: string;
-    lines: any[]; // Could be more specific if line structure is known
+    problemNumber?: string;
+    problemBody: string;
+    problemType: '객관식' | '주관식';
+    choices?: string;
     bbox: Bbox;
 }
+
+// FIX: Define and export AnalyzedProblem for type consistency across services.
+export type AnalyzedProblem = ExtractedProblem & {
+    pageNumber: number;
+    pageImage: string;
+};
 
 // FIX: Define and export the UserSelection interface for reuse.
 export interface UserSelection {
@@ -96,4 +117,23 @@ export interface Bbox {
     y_min: number;
     x_max: number;
     y_max: number;
+}
+
+
+export interface DockComment {
+    id: string; // Firestore document ID
+    userId: string;
+    userDisplayName: string;
+    content: string;
+    createdAt: any; // Firestore Timestamp
+}
+
+export interface DockOpinion {
+    id:string; // Firestore document ID
+    userId: string;
+    userDisplayName: string;
+    content: string;
+    createdAt: any; // Firestore Timestamp
+    commentCount: number;
+    comments?: DockComment[]; // Optional for UI state, fetched on demand
 }

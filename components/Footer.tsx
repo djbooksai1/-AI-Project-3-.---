@@ -47,7 +47,8 @@ export const Footer: React.FC<FooterProps> = ({ onOpenTerms, onOpenPrivacy }) =>
     }, [theme.colors.background]);
 
     // [+] 테마에 따라 로고 색상을 반전시키는 로직
-    const shouldInvert = isColorLight(theme.colors.background);
+    // FIX: 로고가 밝은 배경에서는 어둡게, 어두운 배경에서는 밝게 표시되도록 반전 논리를 수정합니다.
+    const shouldInvert = !isColorLight(theme.colors.background);
     const logoStyle: React.CSSProperties = {
         filter: shouldInvert ? 'invert(1)' : 'none',
         transition: 'filter 0.3s ease-in-out',

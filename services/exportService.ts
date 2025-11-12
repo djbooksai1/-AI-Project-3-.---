@@ -165,6 +165,18 @@ export const exportToHtml = async (
     URL.revokeObjectURL(link.href);
 };
 
+const convertInlineToDisplayMathForHwp = (markdown: string): string => {
+    if (!markdown) return '';
+    let result = markdown;
+    // Convert $...$ to $$...$$, but be careful not to affect existing $$...$$
+    // This regex looks for a single $ not preceded or followed by another $
+    result = result.replace(/(?<!\$)\$([^$\n]+?)\$(?!\$)/g, '$$$$$1$$$$');
+    // Convert \(...\) to $$...$$
+    result = result.replace(/\\\(([\s\S]+?)\\\)/g, '$$$$$1$$$$');
+    return result;
+};
+
+
 export const exportMultipleExplanationsToHwp = async (explanations: Explanation[]): Promise<void> => {
     if (explanations.length === 0) {
         throw new Error("HWP로 내보낼 해설이 선택되지 않았습니다.");
@@ -172,8 +184,13 @@ export const exportMultipleExplanationsToHwp = async (explanations: Explanation[
 
     const combinedContent = explanations
         .sort((a, b) => a.problemNumber - b.problemNumber)
-        .map(exp => `[문제 ${exp.problemNumber}]\n${exp.originalProblemText}\n\n[해설]\n${exp.markdown}`)
+        .map(exp => {
+            const hwpReadyProblemText = convertInlineToDisplayMathForHwp(exp.originalProblemText);
+            const hwpReadyMarkdown = convertInlineToDisplayMathForHwp(exp.markdown);
+            return `[문제 ${exp.problemNumber}]\n${hwpReadyProblemText}\n\n[해설]\n${hwpReadyMarkdown}`;
+        })
         .join('\n\n\n');
+
 
     try {
         const response = await fetch('https://hml-generator-service-646620208083.asia-northeast3.run.app/generate', {

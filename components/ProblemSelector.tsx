@@ -1,19 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
-import { ExtractedProblem, UserSelection } from '../types';
+// FIX: Import `AnalyzedProblem` and use it for props and internal state to ensure type safety.
+import { ExtractedProblem, UserSelection, AnalyzedProblem } from '../types';
 import { Loader } from './Loader';
 import { TrashIcon } from './icons/TrashIcon';
 
 interface ProblemSelectorProps {
     pages: { image: string; pageNumber: number }[];
-    initialProblems: Map<number, ExtractedProblem[]>;
+    // FIX: Use `AnalyzedProblem` to correctly type the incoming problems.
+    initialProblems: Map<number, AnalyzedProblem[]>;
     onConfirm: (selections: UserSelection[]) => void;
     onCancel: () => void;
 }
 
-type Selection = ExtractedProblem & { id: string };
+// FIX: Base the internal selection type on `AnalyzedProblem` to preserve all data.
+type Selection = AnalyzedProblem & { id: string };
 
 type ActiveAction = {
-    type: 'draw' | 'move' | 'resize';
+    type: 'move' | 'resize';
     id?: string;
     handle?: string;
     startPos: { x: number; y: number };
@@ -24,6 +27,7 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
     const [selectionsByPage, setSelectionsByPage] = useState<Map<number, Selection[]>>(new Map());
     const [currentPageNum, setCurrentPageNum] = useState(1);
     const [activeAction, setActiveAction] = useState<ActiveAction | null>(null);
+    const [drawStartPos, setDrawStartPos] = useState<{ x: number; y: number } | null>(null);
     const [drawCurrentPos, setDrawCurrentPos] = useState<{ x: number; y: number } | null>(null);
     const imgRef = useRef<HTMLImageElement>(null);
     const overlayRef = useRef<HTMLDivElement>(null);
@@ -107,29 +111,54 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
         }
     };
     
-    const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
         if ((e.target as HTMLElement).closest('.selection-box-overlay')) return;
         e.preventDefault();
         const pos = getNormalizedCoords(e);
-        if (pos) {
-            setActiveAction({ type: 'draw', startPos: pos });
+        if (!pos) return;
+
+        if (!drawStartPos) {
+            setDrawStartPos(pos);
             setDrawCurrentPos(pos);
+        } else {
+            const x_min = Math.min(drawStartPos.x, pos.x);
+            const y_min = Math.min(drawStartPos.y, pos.y);
+            const x_max = Math.max(drawStartPos.x, pos.x);
+            const y_max = Math.max(drawStartPos.y, pos.y);
+
+            if (x_max - x_min > 0.01 && y_max - y_min > 0.01) {
+                const newSelection: Selection = {
+                    id: `${currentPageNum}-${Math.random().toString(36).substr(2, 9)}`,
+                    bbox: { x_min, y_min, x_max, y_max },
+                    problemType: '주관식',
+                    problemBody: '',
+                    pageImage: pages.find(p => p.pageNumber === currentPageNum)?.image || '',
+                    pageNumber: currentPageNum,
+                };
+                setSelectionsByPage((prev) => {
+                    const newMap = new Map<number, Selection[]>(prev);
+                    const currentPageSelections = newMap.get(currentPageNum) || [];
+                    newMap.set(currentPageNum, [...currentPageSelections, newSelection]);
+                    return newMap;
+                });
+            }
+            setDrawStartPos(null);
+            setDrawCurrentPos(null);
         }
     };
     
     const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (!activeAction) return;
-        e.preventDefault();
         const currentPos = getNormalizedCoords(e);
         if (!currentPos) return;
-    
-        if (activeAction.type === 'draw') {
-            setDrawCurrentPos(currentPos);
-        } else if ((activeAction.type === 'move' || activeAction.type === 'resize') && activeAction.id && activeAction.originalBbox) {
+
+        if (activeAction) {
+            e.preventDefault();
             const dx = currentPos.x - activeAction.startPos.x;
             const dy = currentPos.y - activeAction.startPos.y;
     
             let newBbox: ExtractedProblem['bbox'];
+            
+            if (!activeAction.id || !activeAction.originalBbox) return;
     
             if (activeAction.type === 'move') {
                 const width = activeAction.originalBbox.x_max - activeAction.originalBbox.x_min;
@@ -158,36 +187,15 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
                 newMap.set(currentPageNum, updatedSelections);
                 return newMap;
             });
+        } else if (drawStartPos) {
+             e.preventDefault();
+             setDrawCurrentPos(currentPos);
         }
     };
     
 
-    const handleMouseUp = (e: React.MouseEvent<HTMLDivElement>) => {
-        if (activeAction?.type === 'draw' && activeAction.startPos && drawCurrentPos) {
-            e.preventDefault();
-            const { startPos } = activeAction;
-            const x_min = Math.min(startPos.x, drawCurrentPos.x);
-            const y_min = Math.min(startPos.y, drawCurrentPos.y);
-            const x_max = Math.max(startPos.x, drawCurrentPos.x);
-            const y_max = Math.max(startPos.y, drawCurrentPos.y);
-
-            if (x_max - x_min > 0.01 && y_max - y_min > 0.01) {
-                const newSelection: Selection = {
-                    id: `${currentPageNum}-${Math.random().toString(36).substr(2, 9)}`,
-                    bbox: { x_min, y_min, x_max, y_max },
-                    type: '주관식', 
-                    lines: []
-                };
-                setSelectionsByPage((prev: Map<number, Selection[]>) => {
-                    const newMap = new Map<number, Selection[]>(prev);
-                    const currentPageSelections = newMap.get(currentPageNum) || [];
-                    newMap.set(currentPageNum, [...currentPageSelections, newSelection]);
-                    return newMap;
-                });
-            }
-        }
+    const handleMouseUp = () => {
         setActiveAction(null);
-        setDrawCurrentPos(null);
     };
 
     const handleDelete = (id: string) => {
@@ -227,7 +235,7 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
         <div className="bg-surface rounded-lg shadow-xl border border-primary w-full max-w-5xl flex flex-col max-h-[85vh]">
             <style>{`
                 .resize-handle { position: absolute; width: 10px; height: 10px; background: var(--color-accent); border: 1px solid white; border-radius: 50%; opacity: 0; transition: opacity 0.2s; }
-                .group:hover .resize-handle { opacity: 1; }
+                .group:hover .resize-handle, .group:active .resize-handle { opacity: 1; }
                 .resize-handle.top-left { top: -5px; left: -5px; cursor: nwse-resize; }
                 .resize-handle.top { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
                 .resize-handle.top-right { top: -5px; right: -5px; cursor: nesw-resize; }
@@ -240,7 +248,7 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
             <div className="p-4 border-b border-primary flex justify-between items-center flex-shrink-0">
                 <div>
                     <h2 className="text-xl font-bold text-accent">문제 영역 확인 및 수정</h2>
-                    <p className="text-sm text-text-secondary">AI가 자동으로 찾은 문제 영역입니다. 영역을 클릭하여 삭제하거나, 드래그하여 새로 추가할 수 있습니다.</p>
+                    <p className="text-sm text-text-secondary"><strong className="font-bold text-danger">두 번의 클릭</strong>으로 문제를 선택하세요!</p>
                 </div>
                 <div className="flex items-center gap-4">
                      <button onClick={onCancel} className="px-4 py-2 bg-primary/50 text-text-primary rounded-md hover:bg-primary">
@@ -269,12 +277,12 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
                                 top: `${imageRenderRect.y}px`,
                                 width: `${imageRenderRect.width}px`,
                                 height: `${imageRenderRect.height}px`,
-                                cursor: activeAction?.type === 'draw' ? 'crosshair' : 'default',
+                                cursor: 'crosshair',
                             }}
-                            onMouseDown={handleMouseDown}
+                            onClick={handleOverlayClick}
                             onMouseMove={handleMouseMove}
                             onMouseUp={handleMouseUp}
-                            onMouseLeave={handleMouseUp} // End action if mouse leaves
+                            onMouseLeave={handleMouseUp}
                          >
                             {currentSelections.map(sel => (
                                 <div
@@ -292,7 +300,7 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
                                     <div className="w-full h-full border-2 border-accent bg-accent/20 hover:bg-accent/40 transition-colors pointer-events-none" />
                                     <button
                                         onClick={(e) => { e.stopPropagation(); handleDelete(sel.id); }}
-                                        className="absolute -top-3 -right-3 bg-danger text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+                                        className="absolute -top-3 -right-3 bg-danger text-white rounded-full w-6 h-6 flex items-center justify-center opacity-0 group-hover:opacity-100 group-active:opacity-100 transition-opacity z-10"
                                     >
                                        <TrashIcon />
                                     </button>
@@ -306,14 +314,23 @@ export function ProblemSelector({ pages, initialProblems, onConfirm, onCancel }:
                                     ))}
                                 </div>
                             ))}
-                            {activeAction?.type === 'draw' && activeAction.startPos && drawCurrentPos && (
+                            {drawStartPos && (
+                                <div 
+                                    className="absolute w-3 h-3 -translate-x-1/2 -translate-y-1/2 bg-success rounded-full ring-2 ring-white pointer-events-none z-20"
+                                    style={{
+                                        left: `${drawStartPos.x * 100}%`,
+                                        top: `${drawStartPos.y * 100}%`,
+                                    }}
+                                />
+                            )}
+                            {drawStartPos && drawCurrentPos && (
                                 <div
                                     className="absolute border-2 border-dashed border-success bg-success/20 pointer-events-none"
                                     style={{
-                                        left: `${Math.min(activeAction.startPos.x, drawCurrentPos.x) * 100}%`,
-                                        top: `${Math.min(activeAction.startPos.y, drawCurrentPos.y) * 100}%`,
-                                        width: `${Math.abs(drawCurrentPos.x - activeAction.startPos.x) * 100}%`,
-                                        height: `${Math.abs(drawCurrentPos.y - activeAction.startPos.y) * 100}%`,
+                                        left: `${Math.min(drawStartPos.x, drawCurrentPos.x) * 100}%`,
+                                        top: `${Math.min(drawStartPos.y, drawCurrentPos.y) * 100}%`,
+                                        width: `${Math.abs(drawCurrentPos.x - drawStartPos.x) * 100}%`,
+                                        height: `${Math.abs(drawCurrentPos.y - drawStartPos.y) * 100}%`,
                                     }}
                                 />
                             )}
