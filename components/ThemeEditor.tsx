@@ -37,6 +37,21 @@ export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
         saveThemeSettingsToFirestore, // Get the save function from context
     } = useTheme();
     const [activeTab, setActiveTab] = useState<EditorTab>('colors');
+    
+    // Local state for sliders to prevent instant re-rendering while dragging
+    const [localFontSize, setLocalFontSize] = useState(explanationFontSize);
+    const [localMathSize, setLocalMathSize] = useState(explanationMathSize);
+    const [localPadding, setLocalPadding] = useState(explanationPadding);
+
+    // Sync local state when the modal opens or context value changes from elsewhere
+    useEffect(() => {
+        if (isOpen) {
+            setLocalFontSize(explanationFontSize);
+            setLocalMathSize(explanationMathSize);
+            setLocalPadding(explanationPadding);
+        }
+    }, [isOpen, explanationFontSize, explanationMathSize, explanationPadding]);
+
 
     const handleClose = useCallback(async () => {
         await saveThemeSettingsToFirestore(); // Save settings before closing
@@ -72,42 +87,48 @@ export function ThemeEditor({ isOpen, onClose }: ThemeEditorProps) {
                     <div className="space-y-6">
                         {/* Font Size */}
                         <div>
-                            <label htmlFor="font-size" className="block mb-2 font-semibold">해적지도 본문 폰트 크기: {explanationFontSize.toFixed(1)}px</label>
+                            <label htmlFor="font-size" className="block mb-2 font-semibold">해적지도 본문 폰트 크기: {localFontSize.toFixed(1)}px</label>
                             <input
                                 id="font-size"
                                 type="range"
                                 min="12"
                                 max="20"
                                 step="0.1"
-                                value={explanationFontSize}
-                                onChange={(e) => setExplanationFontSize(Number(e.target.value))}
+                                value={localFontSize}
+                                onChange={(e) => setLocalFontSize(Number(e.target.value))}
+                                onMouseUp={() => setExplanationFontSize(localFontSize)}
+                                onTouchEnd={() => setExplanationFontSize(localFontSize)}
                                 className="w-full h-2 bg-primary rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
                         {/* Math Size */}
                         <div>
-                            <label htmlFor="math-size" className="block mb-2 font-semibold">해적지도 수식 크기: {explanationMathSize}%</label>
+                            <label htmlFor="math-size" className="block mb-2 font-semibold">해적지도 수식 크기: {localMathSize}%</label>
                             <input
                                 id="math-size"
                                 type="range"
                                 min="80"
                                 max="150"
-                                value={explanationMathSize}
-                                onChange={(e) => setExplanationMathSize(Number(e.target.value))}
+                                value={localMathSize}
+                                onChange={(e) => setLocalMathSize(Number(e.target.value))}
+                                onMouseUp={() => setExplanationMathSize(localMathSize)}
+                                onTouchEnd={() => setExplanationMathSize(localMathSize)}
                                 className="w-full h-2 bg-primary rounded-lg appearance-none cursor-pointer"
                             />
                         </div>
                         {/* Padding */}
                         <div>
-                            <label htmlFor="padding-size" className="block mb-2 font-semibold">해적지도 좌우 여백: {explanationPadding}px</label>
+                            <label htmlFor="padding-size" className="block mb-2 font-semibold">해적지도 좌우 여백: {localPadding}px</label>
                             <input
                                 id="padding-size"
                                 type="range"
                                 min="8"
                                 max="100"
                                 step="1"
-                                value={explanationPadding}
-                                onChange={(e) => setExplanationPadding(Number(e.target.value))}
+                                value={localPadding}
+                                onChange={(e) => setLocalPadding(Number(e.target.value))}
+                                onMouseUp={() => setExplanationPadding(localPadding)}
+                                onTouchEnd={() => setExplanationPadding(localPadding)}
                                 className="w-full h-2 bg-primary rounded-lg appearance-none cursor-pointer"
                             />
                         </div>

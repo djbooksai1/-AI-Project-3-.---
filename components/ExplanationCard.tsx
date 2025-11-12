@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
-import { type Explanation, type QnaData } from '../types';
+import { type Explanation, type QnaData, ExplanationMode } from '../types';
 import { XIcon } from './icons/XIcon';
 import { Loader } from './Loader';
 import { ChevronDownIcon } from './icons/ChevronDownIcon';
@@ -80,6 +80,12 @@ const DifficultyStars: React.FC<{ level?: number }> = ({ level }) => {
     );
 };
 
+const modeMap: Record<ExplanationMode, string> = {
+    fast: '빠른해설',
+    dajeong: '표준해설',
+    quality: '전문해설',
+};
+
 export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, index, totalCards, onDelete, onSave, onRetry, isSaving, isRetrying, setRenderedContentRef, id, isSelectionMode, isSelected, onSelect, onOpenQna, isAdmin, onSaveToCache, onRetryRecognition, isRetryingRecognition }) => {
     const [isExpanded, setIsExpanded] = useState(index === 0);
     const renderedContentRef = useRef<HTMLDivElement>(null);
@@ -104,9 +110,12 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, i
         return () => setRenderedContentRef(null);
     }, [setRenderedContentRef, isExpanded]);
     
-    const choicesMarkdown = useMemo(() => {
-        // Replace all newline characters with spaces to force horizontal layout
-        return explanation.choices?.replace(/\\n|\n/g, '  ') || '';
+    const choiceItems = useMemo(() => {
+        if (!explanation.choices) return [];
+        // This regex splits the string before each circled number, preserving the number.
+        // It works whether the choices are on the same line or separated by newlines.
+        const splitRegex = /(?=①|②|③|④|⑤)/;
+        return explanation.choices.split(splitRegex).filter(choice => choice.trim() !== '');
     }, [explanation.choices]);
 
     const markdownStyle = useMemo(() => ({
@@ -159,10 +168,17 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, i
                     setIsExpanded(!isExpanded)}
                 }
             >
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap">
                     {isSelectionMode && <input type="checkbox" checked={isSelected} onChange={() => onSelect(explanation.id)} onClick={e => e.stopPropagation()} className="h-5 w-5 rounded border-primary bg-background text-accent focus:ring-accent cursor-pointer" />}
                     <span className="text-lg font-bold text-accent">문제 {explanation.problemNumber}</span>
                     <span className="text-sm text-text-secondary">(출처: {explanation.pageNumber}p)</span>
+                    {explanation.explanationMode && (
+                        <span className="text-xs font-semibold bg-primary/50 text-text-secondary px-2 py-0.5 rounded-full whitespace-nowrap">
+                            {modeMap[explanation.explanationMode]} / 
+                            직접선택 {explanation.isManualSelection ? 'O' : 'X'} / 
+                            다정강령 {explanation.usedDajeongGuidelines ? 'O' : 'X'}
+                        </span>
+                    )}
                     {explanation.isGolden && <div title="해적 캐시 인증됨"><GoldIcon /></div>}
                 </div>
                 <div className="flex items-center gap-2">
@@ -208,10 +224,18 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, i
                                     markdown={explanation.problemBody}
                                     style={markdownStyle as React.CSSProperties}
                                 />
-                                <MarkdownRenderer
-                                    markdown={choicesMarkdown}
-                                    style={markdownStyle as React.CSSProperties}
-                                />
+                                {choiceItems.length > 0 && (
+                                    <div className="flex flex-row flex-wrap justify-between items-center mt-4 text-center">
+                                        {choiceItems.map((choice, index) => (
+                                            <div key={index} className="px-2 py-1">
+                                                <MarkdownRenderer
+                                                    markdown={choice.trim()}
+                                                    style={markdownStyle as React.CSSProperties}
+                                                />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

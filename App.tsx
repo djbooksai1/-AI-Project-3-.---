@@ -321,7 +321,12 @@ export function App() {
                     dispatch({ type: 'STOP_PROCESSING' });
                     return;
                 }
-                const initialExplanations = await processingService.createInitialExplanations(analyzedProblems, analyzedProblems.length, 0);
+                const initialExplanations = await processingService.createInitialExplanations(
+                    analyzedProblems, 
+                    analyzedProblems.length, 
+                    0,
+                    { explanationMode: explanationMode!, useDajeongGuidelines }
+                );
                 dispatch({ type: 'SET_EXPLANATIONS', payload: initialExplanations });
                 await startGeneration(initialExplanations, useDajeongGuidelines);
                 dispatch({ type: 'STOP_PROCESSING' });
@@ -342,7 +347,11 @@ export function App() {
         cancellationController.current = new AbortController();
 
         try {
-            const initialExplanations = await processingService.createExplanationsFromUserSelections(selections, pagesForSelector);
+            const initialExplanations = await processingService.createExplanationsFromUserSelections(
+                selections, 
+                pagesForSelector,
+                { explanationMode: explanationMode!, useDajeongGuidelines }
+            );
             dispatch({ type: 'SET_EXPLANATIONS', payload: initialExplanations });
             await startGeneration(initialExplanations, useDajeongGuidelines);
         } catch (err) {

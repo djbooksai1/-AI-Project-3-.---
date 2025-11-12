@@ -15,6 +15,10 @@ export interface Explanation {
     choices?: string;
     bbox: Bbox;
 
+    explanationMode?: ExplanationMode;
+    isManualSelection?: boolean;
+    usedDajeongGuidelines?: boolean;
+
 
     // "Dynamic AI Tutor" features
     coreConcepts?: string[];

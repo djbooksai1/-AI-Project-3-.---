@@ -47,7 +47,7 @@ const MarkdownRendererFC: React.FC<{ markdown: string; className?: string; style
         };
 
         renderContent();
-    }, [markdown]); // This effect runs every time the markdown content changes.
+    }, [markdown, className, style]); // This effect runs every time the markdown content changes.
     
     // This is a workaround to prevent react-markdown from interpreting single backslashes in LaTeX
     // as escape characters. MathJax needs double backslashes for newlines (e.g., in `aligned` environments).
@@ -63,6 +63,7 @@ const MarkdownRendererFC: React.FC<{ markdown: string; className?: string; style
                     ul: ({node, ...props}) => <ul className="list-disc pl-6 my-4 space-y-2" {...props} />,
                     ol: ({node, ...props}) => <ol className="list-decimal pl-6 my-4 space-y-2" {...props} />,
                     li: ({node, ...props}) => <li className="pl-2" {...props} />,
+                    blockquote: ({node, ...props}) => <blockquote className="markdown-box border border-text-secondary/50 p-4 my-4 rounded-md bg-primary/20" {...props} />,
                 }}
             >
                 {processedMarkdown}

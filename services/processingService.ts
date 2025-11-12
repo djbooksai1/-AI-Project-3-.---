@@ -16,6 +16,11 @@ interface ProcessingCallbacks {
 
 type PageImage = { image: string; pageNumber: number };
 
+interface GenerationMetadata {
+    explanationMode: ExplanationMode;
+    useDajeongGuidelines: boolean;
+}
+
 export const cropImage = (base64Image: string, bbox: Bbox): Promise<string> => {
     return new Promise((resolve, reject) => {
         const img = new Image();
@@ -115,7 +120,12 @@ export async function analyzePage(pageData: PageImage): Promise<AnalyzedProblem[
     }
 }
 
-export async function createInitialExplanations(analyzedProblems: AnalyzedProblem[], totalProblemCount: number, alreadyFound: number): Promise<Explanation[]> {
+export async function createInitialExplanations(
+    analyzedProblems: AnalyzedProblem[], 
+    totalProblemCount: number, 
+    alreadyFound: number,
+    metadata: GenerationMetadata
+): Promise<Explanation[]> {
     const sortedByPosition = [...analyzedProblems].sort((a, b) => a.bbox.y_min - b.bbox.y_min);
     
     const initialExplanations = sortedByPosition.map((problem, index) => {
@@ -137,6 +147,9 @@ export async function createInitialExplanations(analyzedProblems: AnalyzedProble
             choices: problem.choices,
             variationProblem: undefined,
             bbox: problem.bbox,
+            explanationMode: metadata.explanationMode,
+            isManualSelection: false,
+            usedDajeongGuidelines: metadata.useDajeongGuidelines,
         };
     });
 
@@ -152,6 +165,7 @@ export async function createInitialExplanations(analyzedProblems: AnalyzedProble
 export async function createExplanationsFromUserSelections(
     selections: UserSelection[],
     allPageImages: PageImage[],
+    metadata: GenerationMetadata
 ): Promise<Explanation[]> {
     const explanationPromises = selections.map(async (selection, index) => {
         const page = allPageImages.find(p => p.pageNumber === selection.pageNumber);
@@ -184,7 +198,10 @@ export async function createExplanationsFromUserSelections(
             problemType: problem.problemType,
             choices: problem.choices,
             variationProblem: undefined,
-            bbox: selection.bbox, 
+            bbox: selection.bbox,
+            explanationMode: metadata.explanationMode,
+            isManualSelection: true,
+            usedDajeongGuidelines: metadata.useDajeongGuidelines,
         };
     });
     return Promise.all(explanationPromises);

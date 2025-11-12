@@ -67,6 +67,91 @@ const parseJsonResponse = (responseText: string | undefined, type: string): any 
     }
 };
 
+/**
+ * Forces the AI's output to use the plain Korean speech level ('평어체') by replacing common
+ * formal/honorific endings ('경어체'). This acts as a safeguard when 'useDajeongGuidelines' is active.
+ * @param {string} text - The explanation text from the AI.
+ * @returns {string} The processed text with formal endings converted to plain endings.
+ */
+const postProcessTone = (text: string): string => {
+    if (!text) return "";
+    let processedText = text;
+
+    // A list of common formal endings and their plain equivalents.
+    // The 'g' flag ensures all occurrences are replaced.
+    const replacements = [
+        // ~했습니다 / ~였습니다 -> ~했다 / ~였다 (Past tense)
+        { from: /했습니다/g, to: '했다' },
+        { from: /였습니다/g, to: '였다' },
+        
+        // ~습니다 / ~ㅂ니다 forms
+        { from: /있습니다/g, to: '있다' },
+        { from: /없습니다/g, to: '없다' },
+        { from: /같습니다/g, to: '같다' },
+        { from: /됩니다/g, to: '된다' },
+        { from: /합니다/g, to: '한다' },
+        { from: /입니다/g, to: '이다' },
+        { from: /줍니다/g, to: '준다' },
+        { from: /받습니다/g, to: '받는다' },
+        { from: /봅니다/g, to: '본다' },
+        { from: /않습니다/g, to: '않는다' },
+        { from: /모릅니다/g, to: '모른다' },
+        { from: /압니다/g, to: '안다' },
+        { from: /구합니다/g, to: '구한다' },
+        
+        // Adjective forms (~하다)
+        { from: /필요합니다/g, to: '필요하다' },
+        { from: /가능합니다/g, to: '가능하다' },
+        { from: /중요합니다/g, to: '중요하다' },
+
+        // Common phrases with '수 있습니다'
+        { from: /알 수 있습니다/g, to: '알 수 있다' },
+        { from: /할 수 있습니다/g, to: '할 수 있다' },
+        { from: /풀 수 있습니다/g, to: '풀 수 있다' },
+        { from: /구할 수 있습니다/g, to: '구할 수 있다' },
+        { from: /나타낼 수 있습니다/g, to: '나타낼 수 있다' },
+    ];
+
+    for (const rule of replacements) {
+        processedText = processedText.replace(rule.from, rule.to);
+    }
+
+    return processedText;
+};
+
+/**
+ * A post-processing function to validate and attempt to fix common LaTeX errors
+ * in the AI's generated markdown to prevent MathJax rendering failures.
+ * This acts as a "server-side validation" step.
+ * @param {string} markdown - The raw markdown from the AI.
+ * @returns {string} The processed markdown with fixes applied.
+ */
+const validateAndFixLatex = (markdown: string): string => {
+    if (!markdown) return "";
+    let fixed = markdown;
+
+    // Rule 1: Fix common command misspellings or typos.
+    const corrections = [
+        { from: /\\imes/g, to: '\\times' },
+        { from: /\\le\s/g, to: '\\leq ' },
+        { from: /\\ge\s/g, to: '\\geq ' },
+        { from: /\\cdott/g, to: '\\cdot' },
+        { from: /\\cdpt/g, to: '\\cdot' },
+        { from: /\\ldot/g, to: '\\cdot' },
+    ];
+
+    corrections.forEach(rule => {
+        fixed = fixed.replace(rule.from, rule.to);
+    });
+
+    // Rule 2: Attempt to fix unmatched braces for \frac, a very common error source.
+    // This regex looks for a \frac{...} group that isn't immediately followed by another {...} group.
+    fixed = fixed.replace(/(\\frac\{[^{}]*\})(?!\{)/g, '$1{}');
+
+    return fixed;
+};
+
+
 export const callGemini = functions.https.onCall({ 
     secrets: ["GEMINI_SECRET_KEY"], 
     memory: '2GiB', // AI 호출은 메모리를 많이 사용하므로 2GiB로 설정
@@ -177,9 +262,23 @@ export const callGemini = functions.https.onCall({
                         config: { ...modelConfig, responseMimeType: "application/json", responseSchema },
                     });
                     
-                    // The problematic auto-fixing logic has been removed.
-                    // We now trust the AI's output and pass it directly to the frontend.
-                    return parseJsonResponse(response.text, type);
+                    const parsedData = parseJsonResponse(response.text, type);
+                    
+                    if (Array.isArray(parsedData)) {
+                        for (const item of parsedData) {
+                            if (item && typeof item.explanation === 'string') {
+                                // First, fix any structural LaTeX errors.
+                                item.explanation = validateAndFixLatex(item.explanation);
+
+                                // Then, if Dajeong guidelines are active, enforce the tone.
+                                if (useDajeongGuidelines) {
+                                    item.explanation = postProcessTone(item.explanation);
+                                }
+                            }
+                        }
+                    }
+
+                    return parsedData;
 
                 } catch(sdkError: any) {
                     functions.logger.error(`Gemini SDK error in ${type}`, { errorMessage: sdkError.message, problemTexts });

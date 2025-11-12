@@ -43,6 +43,15 @@
         p:has(> mjx-container[display="true"]) + p:has(> mjx-container[display="true"]) {
             margin-top: -0.75em;
         }
+
+        /* [+] Styles for custom markdown boxes */
+        .markdown-box p {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+        }
+        .markdown-box > p:last-child {
+            margin-bottom: 0;
+        }
     </style>
     
     <!-- [+] Font Loading Fix: Replaced unstable noonnu links with robust Google Fonts API -->
