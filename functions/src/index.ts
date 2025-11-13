@@ -11,7 +11,8 @@ import {
     GENERATE_VARIATION_IDEAS,
     GENERATE_VARIATION_NUMBERS_ONLY,
     SYSTEM_INSTRUCTION,
-    SIMPLE_SYSTEM_INSTRUCTION
+    SIMPLE_SYSTEM_INSTRUCTION,
+    REPARSE_AND_FIX_LATEX_PROMPT
 } from "./prompts";
 
 
@@ -130,7 +131,20 @@ const validateAndFixLatex = (markdown: string): string => {
     if (!markdown) return "";
     let fixed = markdown;
 
-    // Rule 1: Fix common command misspellings or typos.
+    // Rule 0: Fix common AI transcription errors before standard validation.
+    fixed = fixed.replace(/ft([\[({|])/g, '\\left$1');
+    fixed = fixed.replace(/ft\s*\\begin{array}/g, '\\left\\{ \\begin{array}');
+    fixed = fixed.replace(/\\end{array}\s*\\right\./g, '\\end{array} \\right\\}');
+    fixed = fixed.replace(/\simplies\s/g, ' \\implies ');
+    fixed = fixed.replace(/beginaligned/g, '\\begin{aligned}');
+    fixed = fixed.replace(/endaligned/g, '\\end{aligned}');
+    fixed = fixed.replace(/beginarrayll/g, '\\begin{array}{ll}');
+    fixed = fixed.replace(/endarrayright\./g, '\\end{array}\\right.');
+
+    // Rule 1: Fix unescaped curly braces with \left and \right. THIS IS CRITICAL.
+    fixed = fixed.replace(/\\left\{/g, '\\left\\{').replace(/\\right\}/g, '\\right\\}');
+
+    // Rule 2: Fix common command misspellings or typos.
     const corrections = [
         { from: /\\imes/g, to: '\\times' },
         { from: /\\le\s/g, to: '\\leq ' },
@@ -139,14 +153,15 @@ const validateAndFixLatex = (markdown: string): string => {
         { from: /\\cdpt/g, to: '\\cdot' },
         { from: /\\ldot/g, to: '\\cdot' },
     ];
+    corrections.forEach(rule => { fixed = fixed.replace(rule.from, rule.to); });
 
-    corrections.forEach(rule => {
-        fixed = fixed.replace(rule.from, rule.to);
-    });
-
-    // Rule 2: Attempt to fix unmatched braces for \frac, a very common error source.
-    // This regex looks for a \frac{...} group that isn't immediately followed by another {...} group.
+    // Rule 3: Attempt to fix unmatched braces for \frac, a very common error source.
     fixed = fixed.replace(/(\\frac\{[^{}]*\})(?!\{)/g, '$1{}');
+
+    // Rule 4: Ensure display math environments are properly delimited.
+    // This regex finds \begin{...}...\end{...} blocks that are NOT inside $...$ or $$...$$
+    // It uses negative lookbehind/ahead to avoid double-wrapping.
+    fixed = fixed.replace(/(?<![\$])(\\begin\{(?:aligned|align|cases|array)\}[\s\S]*?\\end\{(?:aligned|align|cases|array)\})(?![\$])/g, '$$$$$1$$$$');
 
     return fixed;
 };
@@ -211,11 +226,19 @@ export const callGemini = functions.https.onCall({
 
                     if (Array.isArray(parsedData)) {
                         parsedData.forEach(problem => {
-                            if (problem && problem.bbox) {
-                                problem.bbox.x_min = Math.max(0, Math.min(1, problem.bbox.x_min));
-                                problem.bbox.y_min = Math.max(0, Math.min(1, problem.bbox.y_min));
-                                problem.bbox.x_max = Math.max(0, Math.min(1, problem.bbox.x_max));
-                                problem.bbox.y_max = Math.max(0, Math.min(1, problem.bbox.y_max));
+                            if (problem) {
+                                if (problem.problemBody) {
+                                    problem.problemBody = validateAndFixLatex(problem.problemBody);
+                                }
+                                if (problem.choices) {
+                                    problem.choices = validateAndFixLatex(problem.choices);
+                                }
+                                if (problem.bbox) {
+                                    problem.bbox.x_min = Math.max(0, Math.min(1, problem.bbox.x_min));
+                                    problem.bbox.y_min = Math.max(0, Math.min(1, problem.bbox.y_min));
+                                    problem.bbox.x_max = Math.max(0, Math.min(1, problem.bbox.x_max));
+                                    problem.bbox.y_max = Math.max(0, Math.min(1, problem.bbox.y_max));
+                                }
                             }
                         });
                     }
@@ -313,6 +336,52 @@ export const callGemini = functions.https.onCall({
                     throw new functions.https.HttpsError("unavailable", userMessage);
                 }
             }
+            
+            case 'reparseAndFixLatex': {
+                const { problemText } = payload;
+                if (!problemText) {
+                    throw new functions.https.HttpsError("invalid-argument", "유효한 문제 텍스트가 필요합니다.");
+                }
+            
+                const prompt = REPARSE_AND_FIX_LATEX_PROMPT.replace('{{problemText}}', problemText);
+                
+                const responseSchema = {
+                    type: Type.OBJECT,
+                    properties: {
+                        problemNumber: { type: Type.STRING },
+                        problemType: { type: Type.STRING, enum: ['객관식', '주관식'] },
+                        problemBody: { type: Type.STRING },
+                        choices: { type: Type.STRING }
+                    },
+                    required: ["problemType", "problemBody"],
+                };
+            
+                try {
+                    const response = await ai.models.generateContent({
+                        model: 'gemini-2.5-flash',
+                        contents: [{ parts: [ { text: prompt } ] }],
+                        config: { safetySettings, responseMimeType: "application/json", responseSchema: responseSchema, temperature: 0.0, },
+                    });
+            
+                    const parsedData = parseJsonResponse(response.text, type);
+            
+                    if (parsedData) {
+                        if (parsedData.problemBody) {
+                            parsedData.problemBody = validateAndFixLatex(parsedData.problemBody);
+                        }
+                        if (parsedData.choices) {
+                            parsedData.choices = validateAndFixLatex(parsedData.choices);
+                        }
+                    }
+                
+                    return parsedData;
+                } catch(sdkError: any) {
+                    functions.logger.error(`Gemini SDK error in ${type}`, { errorMessage: sdkError.message });
+                    const userMessage = `AI 텍스트 재인식 서비스에서 오류가 발생했습니다. (오류: ${sdkError.message})`;
+                    throw new functions.https.HttpsError("unavailable", userMessage);
+                }
+            }
+
 
             case 'generateVariationNumbersOnly': {
                 const { originalProblemText } = payload;
@@ -395,21 +464,16 @@ export const updateUserUsage = functions.https.onCall({
             throw new functions.https.HttpsError("invalid-argument", "HWP 내보내기 사용량 업데이트를 위해서는 유효한 횟수가 필요합니다.");
         }
 
-        const currentMonth = new Date().toISOString().slice(0, 7);
-        const monthlyUsageDocRef = db.collection('users').doc(uid).collection('monthlyUsage').doc(currentMonth);
+        const today = new Date().toISOString().slice(0, 10);
+        const dailyUsageDocRef = db.collection('users').doc(uid).collection('usage').doc(today);
         const userDocRef = db.collection('users').doc(uid);
         const incrementValue = admin.firestore.FieldValue.increment(count);
 
         try {
-            // Firestore Batch를 사용하여 월별 사용량과 누적 사용량을 원자적으로 업데이트합니다.
-            // 이 방식은 여러 요청이 동시에 들어오는 경쟁 상태를 방지하고,
-            // 문서가 존재하지 않는 경우에도 오류 없이 안전하게 처리합니다.
             const batch = db.batch();
 
-            // 월별 사용량 업데이트 (문서가 없으면 생성하고, 있으면 증가)
-            batch.set(monthlyUsageDocRef, { hwpExports: incrementValue }, { merge: true });
+            batch.set(dailyUsageDocRef, { hwpExports: incrementValue }, { merge: true });
             
-            // 누적 사용량 업데이트 (문서/필드가 없으면 생성하고, 있으면 증가)
             batch.set(userDocRef, { cumulativeUsage: { hwpExports: incrementValue } }, { merge: true });
 
             await batch.commit();

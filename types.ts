@@ -39,10 +39,11 @@ export interface UsageData {
     fast: number;
     dajeong: number;
     quality: number;
+    hwpExports: number;
 }
 
 export interface MonthlyUsageData {
-    hwpExports: number;
+    
 }
 
 export interface CumulativeUsageData {

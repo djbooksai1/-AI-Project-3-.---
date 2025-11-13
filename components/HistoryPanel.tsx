@@ -16,8 +16,6 @@ interface HistoryPanelProps {
     userTier: UserTier;
     usageData: UsageData;
     tierLimits: UsageData;
-    monthlyHwpUsage: MonthlyUsageData;
-    monthlyHwpLimit: number;
     cumulativeUsage: CumulativeUsageData;
     isAdmin: boolean;
     onUiAssetUpload: (assetName: 'dropzoneImage', file: File) => Promise<void>;
@@ -36,7 +34,7 @@ const modes: { id: ExplanationMode, label: string }[] = [
     { id: 'quality', label: '전문해설' },
 ];
 
-export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, user, userTier, usageData, tierLimits, monthlyHwpUsage, monthlyHwpLimit, cumulativeUsage, isAdmin, onUiAssetUpload }: HistoryPanelProps) {
+export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, user, userTier, usageData, tierLimits, cumulativeUsage, isAdmin, onUiAssetUpload }: HistoryPanelProps) {
     const tierMessage = (tierDisplayMap[userTier] || tierDisplayMap.basic).message;
     const [isUploading, setIsUploading] = useState(false);
     
@@ -125,14 +123,14 @@ export function HistoryPanel({ isOpen, onClose, sets, onLoadSet, onDeleteSet, us
                             </div>
                             <div className="border-t border-primary my-6"></div>
                              <div>
-                                <h4 className="font-semibold text-text-secondary mb-2">이번 달 HWP 내보내기 (누적 {cumulativeUsage.hwpExports || 0}회)</h4>
+                                <h4 className="font-semibold text-text-secondary mb-2">오늘 HWP 내보내기 (누적 {cumulativeUsage.hwpExports || 0}회)</h4>
                                  <div className="mb-3">
                                     <div className="flex justify-between mb-1">
                                         <span className="font-semibold text-text-primary">사용 횟수</span>
-                                        <span className="text-text-secondary">{monthlyHwpUsage.hwpExports} / {monthlyHwpLimit === Infinity ? '∞' : monthlyHwpLimit}</span>
+                                        <span className="text-text-secondary">{(usageData.hwpExports || 0)} / {tierLimits.hwpExports === Infinity ? '∞' : tierLimits.hwpExports}</span>
                                     </div>
                                     <div className="w-full bg-primary rounded-full h-2.5">
-                                        <div className="bg-accent h-2.5 rounded-full" style={{ width: `${monthlyHwpLimit === Infinity || monthlyHwpLimit === 0 ? 0 : Math.min(100, (monthlyHwpUsage.hwpExports / monthlyHwpLimit) * 100)}%` }}></div>
+                                        <div className="bg-accent h-2.5 rounded-full" style={{ width: `${tierLimits.hwpExports === Infinity || tierLimits.hwpExports === 0 ? 0 : Math.min(100, ((usageData.hwpExports || 0) / tierLimits.hwpExports) * 100)}%` }}></div>
                                     </div>
                                 </div>
                             </div>

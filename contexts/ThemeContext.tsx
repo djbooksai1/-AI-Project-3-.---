@@ -28,10 +28,10 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
     const [theme, setThemeState] = useState<Theme>(availableThemes[5]); // Default to "Paper"
     
     // State for explanation-specific typography and styling
-    const [explanationFontSize, setExplanationFontSizeState] = useState<number>(14.5);
+    const [explanationFontSize, setExplanationFontSizeState] = useState<number>(15.0);
     const [explanationMathSize, setExplanationMathSizeState] = useState<number>(105);
     const [explanationPadding, setExplanationPaddingState] = useState<number>(80);
-    const [explanationTextFont, setExplanationTextFontState] = useState<Font>(availableTextFonts[1]); // Default to Batang
+    const [explanationTextFont, setExplanationTextFontState] = useState<Font>(availableTextFonts[2]); // Default to Spoqa Han Sans Neo
     const [currentUser, setCurrentUser] = useState<User | null>(null);
 
     // Fetch settings from Firestore on user auth state change
@@ -73,10 +73,10 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
             } else {
                 // User is signed out, reset to defaults
                 setThemeState(availableThemes[5]); // Paper
-                setExplanationFontSizeState(14.5);
+                setExplanationFontSizeState(15.0);
                 setExplanationMathSizeState(105);
                 setExplanationPaddingState(80);
-                setExplanationTextFontState(availableTextFonts[1]); // Batang
+                setExplanationTextFontState(availableTextFonts[2]); // Spoqa Han Sans Neo
             }
         });
 
@@ -119,7 +119,9 @@ export function ThemeProvider({ children }: React.PropsWithChildren) {
     useEffect(() => {
         const root = document.documentElement;
         Object.entries(theme.colors).forEach(([key, value]) => {
-            root.style.setProperty(`--color-${key}`, value);
+            // FIX: The error indicates `value` might be 'unknown', although types suggest it's a string.
+            // Using String() ensures the value passed to setProperty is always a string, resolving the type error.
+            root.style.setProperty(`--color-${key}`, String(value));
         });
     }, [theme]);
 

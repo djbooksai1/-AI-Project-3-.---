@@ -109,12 +109,26 @@ export const AppProvider = ({ children }: React.PropsWithChildren) => {
         const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
             if (currentUser) {
                 const userDocRef = doc(db, "users", currentUser.uid);
-                const newSessionId = `${Date.now()}-${Math.random()}`;
-                dispatch({ type: 'SET_CURRENT_SESSION_ID', payload: newSessionId });
-                
-                const userDoc = await getDoc(userDocRef);
-                const updateData: { [key: string]: any } = { currentSessionId: newSessionId };
 
+                // Use localStorage to persist session ID across reloads and tabs.
+                // This prevents race conditions from multi-tab usage logging users out.
+                let sessionId = localStorage.getItem('currentSessionId');
+                const isNewLogin = !sessionId;
+
+                if (isNewLogin) {
+                    sessionId = `${Date.now()}-${Math.random()}`;
+                    localStorage.setItem('currentSessionId', sessionId);
+                }
+                
+                dispatch({ type: 'SET_CURRENT_SESSION_ID', payload: sessionId });
+
+                const updateData: { [key: string]: any } = {};
+                // Only update Firestore's session ID on a fresh login to invalidate other sessions.
+                if (isNewLogin) {
+                    updateData.currentSessionId = sessionId;
+                }
+
+                const userDoc = await getDoc(userDocRef);
                 if (!userDoc.exists()) {
                     let formattedPhoneNumber = currentUser.phoneNumber;
                     if (formattedPhoneNumber?.startsWith('+82')) {
@@ -125,9 +139,15 @@ export const AppProvider = ({ children }: React.PropsWithChildren) => {
                     updateData.tier = 'basic';
                 }
                 
-                await setDoc(userDocRef, updateData, { merge: true });
+                // Only write to Firestore if there's something to update (new user or new session).
+                if (Object.keys(updateData).length > 0) {
+                    await setDoc(userDocRef, updateData, { merge: true });
+                }
+                
                 dispatch({ type: 'SET_USER', payload: currentUser });
             } else {
+                // Clear local storage on logout.
+                localStorage.removeItem('currentSessionId');
                 dispatch({ type: 'SET_USER', payload: null });
                 dispatch({ type: 'SET_CURRENT_SESSION_ID', payload: null });
                 dispatch({ type: 'RESET_PROCESSING' });

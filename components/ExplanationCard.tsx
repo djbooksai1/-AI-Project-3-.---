@@ -111,11 +111,14 @@ export const ExplanationCard: React.FC<ExplanationCardProps> = ({ explanation, i
     }, [setRenderedContentRef, isExpanded]);
     
     const choiceItems = useMemo(() => {
-        if (!explanation.choices) return [];
+        if (!explanation.choices || explanation.choices.trim() === '' || explanation.choices.trim().toLowerCase() === 'null') return [];
         // This regex splits the string before each circled number, preserving the number.
         // It works whether the choices are on the same line or separated by newlines.
         const splitRegex = /(?=①|②|③|④|⑤)/;
-        return explanation.choices.split(splitRegex).filter(choice => choice.trim() !== '');
+        return explanation.choices.split(splitRegex).filter(choice => {
+            const trimmedChoice = choice.trim();
+            return trimmedChoice !== '' && trimmedChoice.toLowerCase() !== 'null';
+        });
     }, [explanation.choices]);
 
     const markdownStyle = useMemo(() => ({

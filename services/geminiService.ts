@@ -35,6 +35,12 @@ export const detectMathProblemsFromImage = async (
     return makeApiCall('detectMathProblemsFromImage', { base64Image });
 };
 
+export const reparseAndFixLatex = async (
+    problemText: string
+): Promise<ExtractedProblem> => {
+    return makeApiCall('reparseAndFixLatex', { problemText });
+};
+
 export const generateExplanationsBatch = async (
     problemTexts: string[],
     explanationMode: ExplanationMode,

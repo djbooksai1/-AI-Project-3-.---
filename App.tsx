@@ -26,7 +26,7 @@ import { SaveIcon } from './components/icons/SaveIcon';
 import { AdminHwpRequestsModal } from './components/AdminHwpRequestsModal';
 import { QuestionMarkCircleIcon } from './components/icons/QuestionMarkCircleIcon';
 import { fileToBase64 } from './services/fileService';
-import { generateExplanationsBatch as geminiGenerateExplanations, postProcessMarkdown, detectMathProblemsFromImage } from './services/geminiService';
+import { generateExplanationsBatch as geminiGenerateExplanations, postProcessMarkdown, reparseAndFixLatex } from './services/geminiService';
 import { ProblemSelector } from './components/ProblemSelector';
 import { TypingAnimator } from './components/TypingAnimator';
 import { ToggleSwitch } from './components/ToggleSwitch';
@@ -35,11 +35,11 @@ import { AuthComponent } from './components/AuthComponent';
 import { Alert } from './components/Alert';
 import { DockPanel } from './components/DockPanel';
 
-const TIER_LIMITS: { [key in UserTier]: { daily: UsageData, monthly: MonthlyUsageData } } = {
-    basic: { daily: { fast: 5, dajeong: 3, quality: 1 }, monthly: { hwpExports: 3 } },
-    standard: { daily: { fast: Infinity, dajeong: 3, quality: 1 }, monthly: { hwpExports: 3 } },
-    premium: { daily: { fast: Infinity, dajeong: Infinity, quality: 3 }, monthly: { hwpExports: 10 } },
-    pro: { daily: { fast: Infinity, dajeong: Infinity, quality: Infinity }, monthly: { hwpExports: Infinity } },
+const TIER_LIMITS: { [key in UserTier]: { daily: UsageData } } = {
+    basic: { daily: { fast: 5, dajeong: 3, quality: 1, hwpExports: 3 } },
+    standard: { daily: { fast: Infinity, dajeong: 3, quality: 1, hwpExports: 5 } },
+    premium: { daily: { fast: Infinity, dajeong: Infinity, quality: 3, hwpExports: 10 } },
+    pro: { daily: { fast: Infinity, dajeong: Infinity, quality: Infinity, hwpExports: Infinity } },
 };
 
 const getTodayDateString = () => new Date().toISOString().slice(0, 10);
@@ -66,8 +66,7 @@ export function App() {
     const [explanationSets, setExplanationSets] = useState<ExplanationSet[]>([]);
     const [userTier, setUserTier] = useState<UserTier>('basic');
     const [tierLimits, setTierLimits] = useState(TIER_LIMITS.basic);
-    const [usageData, setUsageData] = useState<UsageData>({ fast: 0, dajeong: 0, quality: 0 });
-    const [monthlyHwpUsage, setMonthlyHwpUsage] = useState<MonthlyUsageData>({ hwpExports: 0 });
+    const [usageData, setUsageData] = useState<UsageData>({ fast: 0, dajeong: 0, quality: 0, hwpExports: 0 });
     const [cumulativeUsage, setCumulativeUsage] = useState<CumulativeUsageData>({ fast: 0, dajeong: 0, quality: 0, hwpExports: 0 });
     const [promptForMode, setPromptForMode] = useState(false);
     const [activeQna, setActiveQna] = useState<QnaData | null>(null);
@@ -146,7 +145,6 @@ export function App() {
             const adminDocRef = doc(db, "admins", uid);
             const userDocRef = doc(db, "users", uid);
             const dailyUsageDocRef = doc(db, "users", uid, "usage", getTodayDateString());
-            const monthlyUsageDocRef = doc(db, "users", uid, "monthlyUsage", getCurrentMonthString());
             const assetsDocRef = doc(db, 'settings', 'uiAssets');
             
             try {
@@ -155,16 +153,14 @@ export function App() {
                     getDoc(adminDocRef),
                     getDoc(userDocRef),
                     getDoc(dailyUsageDocRef),
-                    getDoc(monthlyUsageDocRef),
                     getDoc(assetsDocRef)
                 ]);
 
-                const [setsRes, adminRes, userRes, dailyUsageRes, monthlyUsageRes, assetsRes] = results;
+                const [setsRes, adminRes, userRes, dailyUsageRes, assetsRes] = results;
 
                 if (setsRes.status === 'fulfilled') setExplanationSets(setsRes.value.docs.map(d => ({ id: d.id, ...d.data() } as ExplanationSet)));
                 if (adminRes.status === 'fulfilled') dispatch({ type: 'SET_IS_ADMIN', payload: adminRes.value.exists() });
-                if (dailyUsageRes.status === 'fulfilled') setUsageData(dailyUsageRes.value.exists() ? dailyUsageRes.value.data() as UsageData : { fast: 0, dajeong: 0, quality: 0 });
-                if (monthlyUsageRes.status === 'fulfilled') setMonthlyHwpUsage(monthlyUsageRes.value.exists() ? monthlyUsageRes.value.data() as MonthlyUsageData : { hwpExports: 0 });
+                if (dailyUsageRes.status === 'fulfilled') setUsageData(dailyUsageRes.value.exists() ? dailyUsageRes.value.data() as UsageData : { fast: 0, dajeong: 0, quality: 0, hwpExports: 0 });
                 if (assetsRes.status === 'fulfilled') setUiAssets(prev => ({...prev, dropzoneImageUrl: assetsRes.value.exists() ? assetsRes.value.data().dropzoneImageUrl : ''}));
 
                 if (userRes.status === 'rejected') throw userRes.reason;
@@ -532,15 +528,23 @@ export function App() {
         setIsRetryingRecognition(prev => new Set(prev).add(id));
         
         try {
-            const croppedImageBase64 = await processingService.cropImage(expToRetry.problemImage, expToRetry.bbox);
-            const results = await detectMathProblemsFromImage(croppedImageBase64);
+            const result = await reparseAndFixLatex(expToRetry.originalProblemText);
     
-            if (!results || results.length === 0) throw new Error("파도가 거셉니다! 문제 다시쓰기 버튼을 눌러주세요");
+            if (!result) throw new Error("파도가 거셉니다! 문제 다시쓰기 버튼을 눌러주세요");
     
-            const firstResult = results[0];
-            const newOriginalText = firstResult.problemBody + (firstResult.choices ? `\n${firstResult.choices}` : '');
+            const newOriginalText = result.problemBody + (result.choices ? `\n${result.choices}` : '');
     
-            dispatch({ type: 'UPDATE_EXPLANATION', payload: { ...expToRetry, problemBody: firstResult.problemBody, problemType: firstResult.problemType, choices: firstResult.choices, originalProblemText: newOriginalText, problemNumber: firstResult.problemNumber ? parseInt(firstResult.problemNumber.replace(/[^0-9]/g, ''), 10) : expToRetry.problemNumber }});
+            dispatch({ 
+                type: 'UPDATE_EXPLANATION', 
+                payload: { 
+                    ...expToRetry, 
+                    problemBody: result.problemBody, 
+                    problemType: result.problemType, 
+                    choices: result.choices, 
+                    originalProblemText: newOriginalText, 
+                    problemNumber: result.problemNumber ? parseInt(result.problemNumber.replace(/[^0-9]/g, ''), 10) : expToRetry.problemNumber 
+                }
+            });
         } catch (err) {
             dispatch({ type: 'SET_ERROR', payload: err instanceof Error ? err.message : '문제 재인식 중 오류가 발생했습니다.' });
         } finally {
@@ -594,9 +598,9 @@ export function App() {
     const handleHwpRequest = async () => {
         if (!user || selectedIds.size === 0) return;
     
-        const remainingExports = tierLimits.monthly.hwpExports - monthlyHwpUsage.hwpExports;
+        const remainingExports = tierLimits.daily.hwpExports - (usageData.hwpExports || 0);
         if (remainingExports < selectedIds.size) {
-            alert(`이번 달 HWP 내보내기 횟수가 부족합니다. (남은 횟수: ${remainingExports}회, 선택된 개수: ${selectedIds.size}개)`);
+            alert(`오늘 HWP 내보내기 횟수가 부족합니다. (남은 횟수: ${remainingExports}회, 선택된 개수: ${selectedIds.size}개)`);
             return;
         }
 
@@ -607,7 +611,7 @@ export function App() {
         try {
             await exportMultipleExplanationsToHwp(selectedExplanations);
             await updateUserUsage({ type: 'hwpExport', count: selectedExplanations.length });
-            setMonthlyHwpUsage(prev => ({ ...prev, hwpExports: prev.hwpExports + selectedExplanations.length }));
+            setUsageData(prev => ({ ...prev, hwpExports: (prev.hwpExports || 0) + selectedExplanations.length }));
             setCumulativeUsage(prev => ({ ...prev, hwpExports: (prev.hwpExports || 0) + selectedExplanations.length }));
             dispatch({ type: 'SET_STATUS_MESSAGE', payload: "HWP 파일 다운로드가 시작되었습니다." });
         } catch (error) {
@@ -646,7 +650,7 @@ export function App() {
     
     const activeColorClass: Record<ExplanationMode, string> = { fast: 'bg-blue-600 text-white', dajeong: 'bg-red-600 text-white', quality: 'bg-gold text-black' };
     const getRemaining = (mode: ExplanationMode) => { const limit = tierLimits.daily[mode]; const used = usageData[mode] || 0; return limit === Infinity ? '∞' : Math.max(0, limit - used); };
-    const remainingHwpExports = tierLimits.monthly.hwpExports === Infinity ? '∞' : Math.max(0, tierLimits.monthly.hwpExports - monthlyHwpUsage.hwpExports);
+    const remainingHwpExports = tierLimits.daily.hwpExports === Infinity ? '∞' : Math.max(0, tierLimits.daily.hwpExports - (usageData.hwpExports || 0));
 
     if (isSelectorOpen) {
         return (
@@ -757,7 +761,7 @@ export function App() {
                                                 <button onClick={handleHwpRequest} disabled={!isSelectionMode || selectedIds.size === 0} className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary hover:border-accent disabled:opacity-50 group">
                                                     <span className="relative flex items-center gap-2"><HwpIcon /> 한글로 내보내기 ({remainingHwpExports})</span>
                                                     <div className="relative group/tooltip ml-1.5"><QuestionMarkCircleIcon />
-                                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max px-3 py-1.5 text-xs text-white bg-gray-900/80 rounded-md opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap z-10">이번 달 남은 횟수: {remainingHwpExports}회. 등급별 월간 사용량이 제한됩니다.<div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-900/80"></div></div>
+                                                        <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 w-max px-3 py-1.5 text-xs text-white bg-gray-900/80 rounded-md opacity-0 group-hover/tooltip:opacity-100 whitespace-nowrap z-10">오늘 남은 횟수: {remainingHwpExports}회. 등급별 일일 사용량이 제한됩니다.<div className="absolute top-full left-1/2 -translate-x-1/2 w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-gray-900/80"></div></div>
                                                     </div>
                                                 </button>
                                                 <button disabled className="relative flex items-center justify-center px-4 py-2 text-sm font-semibold bg-surface text-text-primary rounded-md border border-primary opacity-50 cursor-not-allowed group">
@@ -812,7 +816,7 @@ export function App() {
             {isAdmin && <AdminHwpRequestsModal isOpen={isHwpRequestsOpen} onClose={() => setIsHwpRequestsOpen(false)} />}
             <ThemeEditor isOpen={isThemeEditorOpen} onClose={() => setIsThemeEditorOpen(false)} />
             <DockPanel isOpen={isDockOpen} onClose={() => setIsDockOpen(false)} user={user} />
-            <HistoryPanel isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} sets={explanationSets} onLoadSet={handleLoadSet} onDeleteSet={handleDeleteSet} user={user} userTier={userTier} usageData={usageData} tierLimits={tierLimits.daily} monthlyHwpUsage={monthlyHwpUsage} monthlyHwpLimit={tierLimits.monthly.hwpExports} cumulativeUsage={cumulativeUsage} isAdmin={isAdmin} onUiAssetUpload={handleUiAssetUpload} />
+            <HistoryPanel isOpen={isHistoryOpen} onClose={() => setIsHistoryOpen(false)} sets={explanationSets} onLoadSet={handleLoadSet} onDeleteSet={handleDeleteSet} user={user} userTier={userTier} usageData={usageData} tierLimits={tierLimits.daily} cumulativeUsage={cumulativeUsage} isAdmin={isAdmin} onUiAssetUpload={handleUiAssetUpload} />
             <TermsModal isOpen={isTermsOpen} onClose={() => setIsTermsOpen(false)} />
             <PrivacyPolicyModal isOpen={isPrivacyOpen} onClose={() => setIsPrivacyOpen(false)} />
         </div>

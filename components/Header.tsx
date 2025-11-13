@@ -1,11 +1,9 @@
-
-
 import React from 'react';
 import { PaletteIcon } from './icons/PaletteIcon';
 import { User } from 'firebase/auth';
-import { HistoryIcon } from './icons/HistoryIcon';
 import { ClipboardListIcon } from './icons/ClipboardListIcon';
 import { DockIcon } from './icons/DockIcon';
+import { UserIcon } from './icons/UserIcon';
 
 interface HeaderProps {
     onGoHome: () => void;
@@ -63,7 +61,7 @@ export function Header({
                                 className="flex items-center gap-2 px-3 py-2 text-sm font-semibold bg-accent text-white rounded-md hover:bg-accent-hover transition-colors"
                                 title="마이페이지"
                             >
-                                <HistoryIcon />
+                                <UserIcon />
                                 <span className="hidden md:inline">마이페이지</span>
                             </button>
                             
